@@ -446,7 +446,7 @@ namespace cct::gfx
 					MouseEvent wheelEvent = {};
 					wheelEvent.type = MouseEvent::Type::Wheel;
 					wheelEvent.mouseWheel.x = static_cast<int>(event->wheel.mouse_x);
-					wheelEvent.mouseWheel.y = static_cast<int>(event->wheel.mouse_x);
+					wheelEvent.mouseWheel.y = static_cast<int>(event->wheel.mouse_y);
 					wheelEvent.mouseWheel.delta = event->wheel.y;
 					newEvent.type = Event::Type::Mouse;
 					newEvent.data = wheelEvent;

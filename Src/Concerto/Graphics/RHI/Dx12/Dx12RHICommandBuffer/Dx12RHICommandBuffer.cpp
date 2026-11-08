@@ -349,6 +349,59 @@ namespace cct::gfx::rhi
 		Get()->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
 	}
 
+	void Dx12RHICommandBuffer::Copy(const Buffer& src, const Texture& dst, const BufferTextureCopyRegion& region)
+	{
+		if (!IsValid() || m_device == nullptr || region.m_width == 0 || region.m_height == 0)
+		{
+			return;
+		}
+
+		const auto& dx12Buffer = Cast<const Dx12RHIBuffer&>(src);
+		const auto& dx12Texture = Cast<const Dx12RHITexture&>(dst);
+		auto* d3dDevice = m_device->dx12::Device::Get();
+
+		// Derive the texel size from the full-texture footprint.
+		D3D12_RESOURCE_DESC texDesc = dx12Texture.GetResource()->GetDesc();
+		D3D12_PLACED_SUBRESOURCE_FOOTPRINT fullFootprint{};
+		UINT numRows = 0;
+		UINT64 rowSizeInBytes = 0;
+		UINT64 totalBytes = 0;
+		d3dDevice->GetCopyableFootprints(&texDesc, 0, 1, 0, &fullFootprint, &numRows, &rowSizeInBytes, &totalBytes);
+		const UINT64 bytesPerTexel = texDesc.Width > 0 ? rowSizeInBytes / texDesc.Width : 0;
+		const UINT32 rowLength = region.m_bufferRowLength != 0 ? region.m_bufferRowLength : region.m_width;
+
+		const D3D12_RESOURCE_STATES bufState = dx12Buffer.GetState();
+		if (bufState != D3D12_RESOURCE_STATE_COPY_SOURCE &&
+			bufState != D3D12_RESOURCE_STATE_GENERIC_READ)
+		{
+			D3D12_RESOURCE_BARRIER barrier{};
+			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barrier.Transition.pResource = dx12Buffer.GetResource();
+			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			barrier.Transition.StateBefore = bufState;
+			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+			Get()->ResourceBarrier(1, &barrier);
+			dx12Buffer.SetState(D3D12_RESOURCE_STATE_COPY_SOURCE);
+		}
+
+		D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+		dstLoc.pResource = dx12Texture.GetResource();
+		dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		dstLoc.SubresourceIndex = 0;
+
+		D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+		srcLoc.pResource = dx12Buffer.GetResource();
+		srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		srcLoc.PlacedFootprint.Offset = region.m_bufferOffset;
+		srcLoc.PlacedFootprint.Footprint.Format = texDesc.Format;
+		srcLoc.PlacedFootprint.Footprint.Width = region.m_width;
+		srcLoc.PlacedFootprint.Footprint.Height = region.m_height;
+		srcLoc.PlacedFootprint.Footprint.Depth = 1;
+		srcLoc.PlacedFootprint.Footprint.RowPitch = static_cast<UINT>(rowLength * bytesPerTexel);
+
+		Get()->CopyTextureRegion(&dstLoc, static_cast<UINT>(region.m_x), static_cast<UINT>(region.m_y), 0, &srcLoc, nullptr);
+	}
+
 	void Dx12RHICommandBuffer::Copy(const Texture& src, const Buffer& dst, UInt64 dstOffset)
 	{
 		if (!IsValid() || !m_device)

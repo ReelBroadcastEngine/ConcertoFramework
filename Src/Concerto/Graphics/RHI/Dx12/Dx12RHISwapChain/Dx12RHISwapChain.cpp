@@ -70,6 +70,12 @@ namespace cct::gfx::rhi
 		return m_frames[m_currentFrameIndex];
 	}
 
+	UInt32 Dx12RHISwapChain::GetCurrentFrameSlot() const
+	{
+		// On DX12 the fence slot is the back buffer index.
+		return static_cast<UInt32>(m_currentFrameIndex);
+	}
+
 	void Dx12RHISwapChain::WaitAll() const
 	{
 		for (auto& frame : m_frames)

@@ -56,6 +56,8 @@ namespace cct::gfx::rhi
 		}
 		virtual void Copy(const Buffer& src, const Texture& dst) = 0;
 		virtual void Copy(const Texture& src, const Buffer& dst, UInt64 dstOffset = 0) = 0;
+		// Copies a sub-rectangle from a buffer into a texture in TransferDstOptimal layout.
+		virtual void Copy(const Buffer& src, const Texture& dst, const BufferTextureCopyRegion& region) = 0;
 		virtual void TransitionImageLayout(const Texture& texture, ImageLayout oldLayout, ImageLayout newLayout) = 0;
 
 		virtual void BindPipeline(const Pipeline& pipeline)

@@ -67,6 +67,8 @@ namespace cct::gfx::rhi
 							 std::function<void(RenderGraphContext&)> execute);
 
 		void SetFinalOutput(RGTextureHandle handle);
+		// Color used when a pass is the first writer of a color attachment (load op Clear).
+		void SetClearColor(const Vector3f& color);
 
 		void Compile();
 
@@ -138,6 +140,7 @@ namespace cct::gfx::rhi
 		std::deque<PendingFrameResources> m_pendingFrames; // deferred cleanup queue
 		UInt32 m_maxFramesInFlight;
 		RGTextureHandle m_finalOutput;
+		Vector3f m_clearColor{0.F, 0.F, 0.F};
 		bool m_dirty = true;
 		FrameBuffer* m_currentFrameBuffer = nullptr; // active framebuffer across a merge group
 	};

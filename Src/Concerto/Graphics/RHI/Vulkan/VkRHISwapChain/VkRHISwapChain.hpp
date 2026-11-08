@@ -32,6 +32,7 @@ namespace cct::gfx::rhi
 		Vector2u GetExtent() const override;
 		UInt32 GetImageCount() const override;
 		Frame& AcquireFrame() override;
+		[[nodiscard]] UInt32 GetCurrentFrameSlot() const override;
 		void WaitAll() const override;
 		std::shared_ptr<Texture> GetColorTexture(UInt32 imageIndex) override;
 

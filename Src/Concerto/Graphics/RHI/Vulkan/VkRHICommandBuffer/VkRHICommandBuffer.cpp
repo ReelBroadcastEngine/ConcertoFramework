@@ -219,6 +219,28 @@ namespace cct::gfx::rhi
 			1, &copyRegion);
 	}
 
+	void VkRHICommandBuffer::Copy(const Buffer& src, const Texture& dst, const BufferTextureCopyRegion& region)
+	{
+		const auto& vkBuffer = Cast<const VkRHIBuffer&>(src);
+		const auto& vkTexture = Cast<const VkRHITexture&>(dst);
+
+		VkBufferImageCopy copyRegion = {};
+		copyRegion.bufferOffset = region.m_bufferOffset;
+		copyRegion.bufferRowLength = region.m_bufferRowLength;
+		copyRegion.bufferImageHeight = 0;
+		copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		copyRegion.imageSubresource.mipLevel = 0;
+		copyRegion.imageSubresource.baseArrayLayer = 0;
+		copyRegion.imageSubresource.layerCount = 1;
+		copyRegion.imageOffset = {.x = region.m_x, .y = region.m_y, .z = 0};
+		copyRegion.imageExtent = {.width = region.m_width, .height = region.m_height, .depth = 1};
+
+		m_device->vkCmdCopyBufferToImage(
+			*vk::CommandBuffer::Get(), *static_cast<const vk::Buffer&>(vkBuffer).Get(),
+			*vkTexture.GetImage().Get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1, &copyRegion);
+	}
+
 	void VkRHICommandBuffer::Copy(const Texture& src, const Buffer& dst, UInt64 dstOffset)
 	{
 		const auto& vkTexture = Cast<const VkRHITexture&>(src);

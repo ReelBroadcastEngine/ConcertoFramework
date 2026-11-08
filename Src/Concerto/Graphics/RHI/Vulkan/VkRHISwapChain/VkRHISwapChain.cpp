@@ -77,16 +77,24 @@ namespace cct::gfx::rhi
 			GetDevice()->WaitIdle();
 			vk::SwapChain::Create(*m_device, GetWindow(), Converters::ToVulkan(m_pixelFormat), Converters::ToVulkan(m_depthPixelFormat));
 			m_colorTextures.clear();
-			m_frames.clear();
+			m_frames.clear(); // invalidates currentFrame
 			CreateFrames();
 			CreateColorTextures(GetRHIDevice());
 			m_needResize = false;
-			vk::SwapChain::AcquireNextImage(currentFrame.GetPresentSemaphore(), nextImageIndex, nullptr);
-			m_frames[m_currentFrameIndex].SetNextImageIndex(nextImageIndex);
-			return m_frames[m_currentFrameIndex];
+			// The image count may have changed; the device is idle, so any slot is safe to use.
+			m_currentFrameIndex %= GetImageCount();
+			SwapChainFrame& recreatedFrame = m_frames.at(m_currentFrameIndex);
+			vk::SwapChain::AcquireNextImage(recreatedFrame.GetPresentSemaphore(), nextImageIndex, nullptr);
+			recreatedFrame.SetNextImageIndex(nextImageIndex);
+			return recreatedFrame;
 		}
 
 		return currentFrame;
+	}
+
+	UInt32 VkRHISwapChain::GetCurrentFrameSlot() const
+	{
+		return m_currentFrameIndex;
 	}
 
 	void VkRHISwapChain::WaitAll() const

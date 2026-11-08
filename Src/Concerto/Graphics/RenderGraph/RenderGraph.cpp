@@ -101,6 +101,11 @@ namespace cct::gfx::rhi
 		MarkDirty();
 	}
 
+	void RenderGraph::SetClearColor(const Vector3f& color)
+	{
+		m_clearColor = color;
+	}
+
 	void RenderGraph::Compile()
 	{
 		RetireCompiledPasses();
@@ -299,7 +304,7 @@ namespace cct::gfx::rhi
 
 				m_currentFrameBuffer = cachedFrameBuffer->frameBuffer.get();
 				activeRenderPass = compiled.renderPass.get();
-				cmd.BeginRenderPass(*compiled.renderPass, *m_currentFrameBuffer, Vector3f{0.f, 0.f, 0.f});
+				cmd.BeginRenderPass(*compiled.renderPass, *m_currentFrameBuffer, m_clearColor);
 			}
 
 			RenderGraphContext ctx(cmd, m_currentFrameBuffer, activeRenderPass, m_registry, frameWidth, frameHeight);
