@@ -3,7 +3,9 @@
 
 #include <Concerto/Core/FunctionRef/FunctionRef.hpp>
 #include <Concerto/Core/Types/Types.hpp>
+#include <Concerto/Reflection/Boolean/Boolean.refl.hpp>
 #include <Concerto/Reflection/Defines.hpp>
+#include <Concerto/Reflection/Float32/Float32.refl.hpp>
 #include <Concerto/Reflection/Int32/Int32.refl.hpp>
 #include <Concerto/Reflection/Object/Object.refl.hpp>
 
@@ -126,6 +128,54 @@ namespace cct::sample
 		std::string m_stringValue;
 
 		CCT_OBJECT(JsonSample);
+	};
+
+	class CCT_REFL_TESTS_CLASS() MemberAttributeSample : public cct::refl::Object
+	{
+	public:
+		MemberAttributeSample() :
+			m_value(7)
+		{
+		}
+
+		CCT_REFL_TESTS_MEMBER("Id = \"sample.value\"", "Min = 0", "Max = 100", "Step = 0.1234567891",
+							  "Range = { Lo = 1, Hi = 2.5 }",
+							  "Label = \"quote \\\" backslash \\\\ tab \\t newline \\n braces {} percent %s\"",
+							  "Unicode = \"caf\\u00e9\"", "\"quoted \\\"key\\\"\" = true")
+		cct::refl::Int32 m_value;
+
+		CCT_REFL_TESTS_NATIVE_MEMBER("Id = \"sample.native\"", "Min = -5")
+		cct::Int32 m_native = 3;
+
+		CCT_OBJECT(MemberAttributeSample);
+	};
+
+	class CCT_REFL_TESTS_CLASS() SampleShape : public cct::refl::Object
+	{
+	public:
+		SampleShape() :
+			m_radius(1.5f)
+		{
+		}
+
+		CCT_REFL_TESTS_MEMBER()
+		cct::refl::Float32 m_radius;
+
+		CCT_OBJECT(SampleShape);
+	};
+
+	class CCT_REFL_TESTS_CLASS() SampleCircle : public SampleShape
+	{
+	public:
+		SampleCircle() :
+			m_enabled(true)
+		{
+		}
+
+		CCT_REFL_TESTS_MEMBER()
+		cct::refl::Boolean m_enabled;
+
+		CCT_OBJECT(SampleCircle);
 	};
 
 	// Generic class with multiple type parameters (runtime parameterized)

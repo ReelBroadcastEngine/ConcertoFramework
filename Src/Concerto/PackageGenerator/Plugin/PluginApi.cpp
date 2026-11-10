@@ -12,6 +12,7 @@
 
 #include "Concerto/Core/Assert.hpp"
 #include "Concerto/PackageGenerator/Defines.hpp"
+#include "Concerto/PackageGenerator/Plugin/FlatAttributes.hpp"
 #include "Concerto/PackageGenerator/Plugin/ReflectionGeneratorPlugin.hpp"
 
 extern "C"
@@ -498,6 +499,20 @@ extern "C"
 		return nullptr;
 	}
 
+	size_t crpClassMemberForEachFlatAttribute(const CrpClassMember* member, CrpFlatAttributeVisitor visitor, void* userData)
+	{
+		CCT_AUTO_PROFILER_SCOPE();
+		if (!member)
+			return 0;
+		const cct::FlatAttributes attributes = cct::FlattenAttributes(reinterpret_cast<const Class::Member*>(member)->tomlAttributes);
+		if (visitor)
+		{
+			for (const auto& [key, value] : attributes)
+				visitor(key.c_str(), value.c_str(), userData);
+		}
+		return attributes.size();
+	}
+
 	const char* crpClassMethodGetName(const CrpClassMethod* method)
 	{
 		CCT_AUTO_PROFILER_SCOPE();
@@ -722,7 +737,7 @@ extern "C"
 	}
 
 	const char* crpClassMethodGetAttributeTableValue(const CrpClassMethod* method, const char* attrName,
-													const char* keyName)
+													 const char* keyName)
 	{
 		CCT_AUTO_PROFILER_SCOPE();
 		if (!method || !attrName || !keyName)

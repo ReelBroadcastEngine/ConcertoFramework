@@ -152,6 +152,7 @@ extern "C"
 	} CrpPluginFunctionTable;
 
 	typedef const CrpPluginFunctionTable* (*CrpGetPluginFunctionTableFunc)(void);
+	typedef void (*CrpFlatAttributeVisitor)(const char* key, const char* value, void* userData);
 
 #define CRP_PLUGIN_ENTRY_POINT_NAME "crpGetPluginFunctionTable"
 
@@ -203,6 +204,9 @@ extern "C"
 	CRP_PLUGIN_API size_t crpClassMemberGetAttributeTableKeyCount(const CrpClassMember* member, const char* attrName);
 	CRP_PLUGIN_API const char* crpClassMemberGetAttributeTableKey(const CrpClassMember* member, const char* attrName, size_t index);
 	CRP_PLUGIN_API const char* crpClassMemberGetAttributeTableValue(const CrpClassMember* member, const char* attrName, const char* keyName);
+	// Calls visitor for every attribute of member, sorted by key, nested tables flattened to dotted
+	// keys. key and value are only valid during the call. visitor may be NULL to only count.
+	CRP_PLUGIN_API size_t crpClassMemberForEachFlatAttribute(const CrpClassMember* member, CrpFlatAttributeVisitor visitor, void* userData);
 
 	CRP_PLUGIN_API const char* crpClassMethodGetName(const CrpClassMethod* method);
 	CRP_PLUGIN_API const char* crpClassMethodGetBase(const CrpClassMethod* method);

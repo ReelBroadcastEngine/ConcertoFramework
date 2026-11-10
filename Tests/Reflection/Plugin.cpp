@@ -2,11 +2,16 @@
 // Created by arthur
 //
 
+#include <atomic>
 #include <sstream>
+#include <thread>
+#include <vector>
 
+#include "Concerto/PackageGenerator/Plugin/FlatAttributes.hpp"
 #include "Concerto/PackageGenerator/Plugin/PluginApi.h"
 #include "Concerto/PackageGenerator/Plugin/ReflectionGeneratorPlugin.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <toml11/parser.hpp>
 
 SCENARIO("GenerationContext write operations")
 {
@@ -370,5 +375,80 @@ SCENARIO("crpGenerationContextGetPrivateData")
 				CHECK(result == nullptr);
 			}
 		}
+	}
+}
+
+SCENARIO("FlattenAttributes")
+{
+	GIVEN("Scalar, floating and nested table attributes")
+	{
+		const TomlAttributes attributes = toml::parse_str("Max = 100\nId = \"sample.value\"\nStep = 0.1234567891\nRange = { Lo = 1, Hi = 2.5 }\nEnabled = true");
+		const cct::FlatAttributes expected = {
+			{"Enabled", "true"},
+			{"Id", "sample.value"},
+			{"Max", "100"},
+			{"Range.Hi", "2.5"},
+			{"Range.Lo", "1"},
+			{"Step", "0.1234567891"},
+		};
+
+		WHEN("They are flattened")
+		{
+			const cct::FlatAttributes flat = cct::FlattenAttributes(attributes);
+
+			THEN("Nested tables become dotted keys, sorted by key, with full precision")
+			{
+				CHECK(flat == expected);
+			}
+		}
+
+		WHEN("They are flattened from several threads")
+		{
+			const TomlAttributes other = toml::parse_str("Id = \"other\"\nMin = -5");
+			const cct::FlatAttributes otherExpected = {{"Id", "other"}, {"Min", "-5"}};
+
+			std::atomic<int> mismatches = 0;
+			std::vector<std::thread> threads;
+			for (int t = 0; t < 8; ++t)
+			{
+				threads.emplace_back([&, t]()
+									 {
+					const bool useOther = (t % 2) != 0;
+					for (int i = 0; i < 200; ++i)
+					{
+						if (cct::FlattenAttributes(useOther ? other : attributes) != (useOther ? otherExpected : expected))
+							++mismatches;
+					} });
+			}
+			for (std::thread& thread : threads)
+				thread.join();
+
+			THEN("Each call returns its own snapshot")
+			{
+				CHECK(mismatches == 0);
+			}
+		}
+	}
+
+	GIVEN("No attributes")
+	{
+		THEN("Nothing is flattened")
+		{
+			CHECK(cct::FlattenAttributes(TomlAttributes{}).empty());
+			CHECK(cct::FlattenAttributes(toml::parse_str("")).empty());
+		}
+	}
+}
+
+SCENARIO("crpClassMemberForEachFlatAttribute with a NULL member")
+{
+	THEN("Nothing is visited")
+	{
+		int calls = 0;
+		const std::size_t count = crpClassMemberForEachFlatAttribute(
+			nullptr, [](const char*, const char*, void* userData)
+			{ ++*static_cast<int*>(userData); }, &calls);
+		CHECK(count == 0);
+		CHECK(calls == 0);
 	}
 }
