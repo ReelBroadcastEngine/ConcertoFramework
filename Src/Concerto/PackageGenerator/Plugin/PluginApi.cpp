@@ -737,7 +737,7 @@ extern "C"
 	}
 
 	const char* crpClassMethodGetAttributeTableValue(const CrpClassMethod* method, const char* attrName,
-													const char* keyName)
+													 const char* keyName)
 	{
 		CCT_AUTO_PROFILER_SCOPE();
 		if (!method || !attrName || !keyName)

@@ -412,14 +412,13 @@ SCENARIO("FlattenAttributes")
 			for (int t = 0; t < 8; ++t)
 			{
 				threads.emplace_back([&, t]()
-				{
+									 {
 					const bool useOther = (t % 2) != 0;
 					for (int i = 0; i < 200; ++i)
 					{
 						if (cct::FlattenAttributes(useOther ? other : attributes) != (useOther ? otherExpected : expected))
 							++mismatches;
-					}
-				});
+					} });
 			}
 			for (std::thread& thread : threads)
 				thread.join();
@@ -447,7 +446,8 @@ SCENARIO("crpClassMemberForEachFlatAttribute with a NULL member")
 	{
 		int calls = 0;
 		const std::size_t count = crpClassMemberForEachFlatAttribute(
-			nullptr, [](const char*, const char*, void* userData) { ++*static_cast<int*>(userData); }, &calls);
+			nullptr, [](const char*, const char*, void* userData)
+			{ ++*static_cast<int*>(userData); }, &calls);
 		CHECK(count == 0);
 		CHECK(calls == 0);
 	}
