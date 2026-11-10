@@ -3,7 +3,9 @@
 
 #include <Concerto/Core/FunctionRef/FunctionRef.hpp>
 #include <Concerto/Core/Types/Types.hpp>
+#include <Concerto/Reflection/Boolean/Boolean.refl.hpp>
 #include <Concerto/Reflection/Defines.hpp>
+#include <Concerto/Reflection/Float32/Float32.refl.hpp>
 #include <Concerto/Reflection/Int32/Int32.refl.hpp>
 #include <Concerto/Reflection/Object/Object.refl.hpp>
 
@@ -128,8 +130,6 @@ namespace cct::sample
 		CCT_OBJECT(JsonSample);
 	};
 
-	// Member attributes beyond Min/Max must reach the runtime: arbitrary keys (Id), nested tables
-	// (dotted keys), full-precision numbers, and keys/values that need escaping in generated C++.
 	class CCT_REFL_TESTS_CLASS() MemberAttributeSample : public cct::refl::Object
 	{
 	public:
@@ -148,6 +148,34 @@ namespace cct::sample
 		cct::Int32 m_native = 3;
 
 		CCT_OBJECT(MemberAttributeSample);
+	};
+
+	class CCT_REFL_TESTS_CLASS() SampleShape : public cct::refl::Object
+	{
+	public:
+		SampleShape() :
+			m_radius(1.5f)
+		{
+		}
+
+		CCT_REFL_TESTS_MEMBER()
+		cct::refl::Float32 m_radius;
+
+		CCT_OBJECT(SampleShape);
+	};
+
+	class CCT_REFL_TESTS_CLASS() SampleCircle : public SampleShape
+	{
+	public:
+		SampleCircle() :
+			m_enabled(true)
+		{
+		}
+
+		CCT_REFL_TESTS_MEMBER()
+		cct::refl::Boolean m_enabled;
+
+		CCT_OBJECT(SampleCircle);
 	};
 
 	// Generic class with multiple type parameters (runtime parameterized)

@@ -126,9 +126,7 @@ SCENARIO("MemberVariable attributes")
 			CHECK(value->GetAttribute("Id"sv) == "sample.value"sv);
 			CHECK(value->GetAttribute("Min"sv) == "0"sv);
 			CHECK(value->GetAttribute("Max"sv) == "100"sv);
-			// Full precision: "%g" would have produced "0.123457".
 			CHECK(value->GetAttribute("Step"sv) == "0.1234567891"sv);
-			// Nested tables are flattened into dotted keys.
 			CHECK(value->GetAttribute("Range.Lo"sv) == "1"sv);
 			CHECK(value->GetAttribute("Range.Hi"sv) == "2.5"sv);
 			CHECK(value->GetAttributes().size() == 9);
@@ -192,6 +190,84 @@ SCENARIO("Typed Object::GetMemberVariable<T> on a derived class")
 		{
 			CHECK(object.GetMemberVariable<cct::refl::Int32>("missing"sv) == nullptr);
 			CHECK(constObject.GetMemberVariable<cct::refl::Int32>("missing"sv) == nullptr);
+		}
+	}
+}
+
+SCENARIO("Typed Object::GetMemberVariable<T> on inherited members")
+{
+	using namespace std::string_view_literals;
+	GIVEN("A 'SampleCircle' whose base 'SampleShape' declares 'radius'")
+	{
+		cct::refl::PackageLoader packageLoader;
+		REQUIRE(packageLoader.AddPackage(CreateConcertoReflectionPackage()));
+		REQUIRE(packageLoader.AddPackage(CreateConcertoReflectionTestsPackage()));
+		packageLoader.LoadPackages();
+
+		cct::sample::SampleCircle circle;
+		cct::refl::Object& object = circle;
+		const cct::refl::Object& constObject = circle;
+
+		THEN("An inherited member resolves to the base class field")
+		{
+			cct::refl::Float32* radius = object.GetMemberVariable<cct::refl::Float32>("radius"sv);
+			const cct::refl::Float32* constRadius = constObject.GetMemberVariable<cct::refl::Float32>("radius"sv);
+
+			CHECK(radius == &circle.m_radius);
+			CHECK(constRadius == &circle.m_radius);
+			REQUIRE(radius);
+			CHECK(*radius == 1.5f);
+		}
+
+		THEN("A member declared by the derived class resolves to its own field")
+		{
+			cct::refl::Boolean* enabled = object.GetMemberVariable<cct::refl::Boolean>("enabled"sv);
+			const cct::refl::Boolean* constEnabled = constObject.GetMemberVariable<cct::refl::Boolean>("enabled"sv);
+
+			CHECK(enabled == &circle.m_enabled);
+			CHECK(constEnabled == &circle.m_enabled);
+		}
+	}
+}
+
+SCENARIO("Member variable indices are local to the declaring class")
+{
+	using namespace std::string_view_literals;
+	GIVEN("'SampleCircle' deriving from 'SampleShape', each declaring one member")
+	{
+		cct::refl::PackageLoader packageLoader;
+		REQUIRE(packageLoader.AddPackage(CreateConcertoReflectionPackage()));
+		REQUIRE(packageLoader.AddPackage(CreateConcertoReflectionTestsPackage()));
+		packageLoader.LoadPackages();
+
+		const cct::refl::Class* shapeClass = cct::sample::SampleShape::GetClass();
+		const cct::refl::Class* circleClass = cct::sample::SampleCircle::GetClass();
+		REQUIRE(shapeClass);
+		REQUIRE(circleClass);
+		REQUIRE(circleClass->GetBaseClass() == shapeClass);
+
+		THEN("Each class indexes its own members from 0")
+		{
+			const cct::refl::MemberVariable* radius = circleClass->GetMemberVariable("radius"sv);
+			REQUIRE(radius);
+			CHECK(radius->GetIndex() == 0);
+			CHECK(shapeClass->GetMemberVariable(std::size_t{0}) == radius);
+
+			CHECK(circleClass->GetMemberVariableCount() == 1);
+			const cct::refl::MemberVariable* enabled = circleClass->GetMemberVariable(std::size_t{0});
+			REQUIRE(enabled);
+			CHECK(enabled->GetName() == "enabled"sv);
+		}
+
+		THEN("Object index lookups address the dynamic class members")
+		{
+			cct::sample::SampleCircle circle;
+			cct::refl::Object& object = circle;
+			const cct::refl::Object& constObject = circle;
+
+			CHECK(object.GetMemberVariable(std::size_t{0}) == &circle.m_enabled);
+			CHECK(object.GetMemberVariable<cct::refl::Boolean>(std::size_t{0}) == &circle.m_enabled);
+			CHECK(constObject.GetMemberVariable<cct::refl::Boolean>(std::size_t{0}) == &circle.m_enabled);
 		}
 	}
 }

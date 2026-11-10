@@ -125,9 +125,7 @@ namespace cct::refl
 
 	const MemberVariable* Class::GetMemberVariable(std::size_t index) const
 	{
-		if (m_memberVariables.empty())
-			return nullptr;
-		if (index > m_memberVariables.size())
+		if (index >= m_memberVariables.size())
 			return nullptr;
 		return m_memberVariables[index].get();
 	}

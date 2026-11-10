@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <utility>
+
 #include <Concerto/Core/TypeInfo/TypeInfo.hpp>
 
 #include "Concerto/Reflection/Class/Class.hpp"
@@ -135,19 +137,23 @@ namespace cct::refl
 	template<typename T>
 	T* Object::GetMemberVariable(std::string_view name)
 	{
-		const MemberVariable* memberVariable = GetDynamicClass()->GetMemberVariable(name);
-		if (memberVariable == nullptr)
-			return nullptr;
-		return GetMemberVariable<T>(memberVariable->GetIndex());
+		return const_cast<T*>(std::as_const(*this).template GetMemberVariable<T>(name));
 	}
 
 	template<typename T>
 	const T* Object::GetMemberVariable(std::string_view name) const
 	{
-		const MemberVariable* memberVariable = GetDynamicClass()->GetMemberVariable(name);
-		if (memberVariable == nullptr)
+		const Object* object = GetMemberVariable(name);
+		if (object == nullptr)
 			return nullptr;
-		return GetMemberVariable<T>(memberVariable->GetIndex());
+#ifdef CCT_DEBUG
+		if (dynamic_cast<const T*>(object) == nullptr) [[unlikely]]
+		{
+			CCT_ASSERT_FALSE("Member '{}' of '{}' is not convertible to '{}'", name, GetDynamicClass()->GetName(), T::GetClass()->GetName());
+			return nullptr;
+		}
+#endif
+		return static_cast<const T*>(object);
 	}
 
 	template<typename T>
