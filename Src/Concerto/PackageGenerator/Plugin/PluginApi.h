@@ -152,6 +152,7 @@ extern "C"
 	} CrpPluginFunctionTable;
 
 	typedef const CrpPluginFunctionTable* (*CrpGetPluginFunctionTableFunc)(void);
+	typedef void (*CrpFlatAttributeVisitor)(const char* key, const char* value, void* userData);
 
 #define CRP_PLUGIN_ENTRY_POINT_NAME "crpGetPluginFunctionTable"
 
@@ -203,12 +204,9 @@ extern "C"
 	CRP_PLUGIN_API size_t crpClassMemberGetAttributeTableKeyCount(const CrpClassMember* member, const char* attrName);
 	CRP_PLUGIN_API const char* crpClassMemberGetAttributeTableKey(const CrpClassMember* member, const char* attrName, size_t index);
 	CRP_PLUGIN_API const char* crpClassMemberGetAttributeTableValue(const CrpClassMember* member, const char* attrName, const char* keyName);
-	// Flatten all of a member's TOML attributes (nested tables as dotted keys, sorted by key) into a
-	// snapshot for codegen. Floating values use their shortest round-trip form. The snapshot stays
-	// valid until the next call.
-	CRP_PLUGIN_API size_t crpClassMemberFlattenAttributes(const CrpClassMember* member);
-	CRP_PLUGIN_API const char* crpClassMemberGetFlatAttributeKey(size_t index);
-	CRP_PLUGIN_API const char* crpClassMemberGetFlatAttributeValue(size_t index);
+	// Calls visitor for every attribute of member, sorted by key, nested tables flattened to dotted
+	// keys. key and value are only valid during the call. visitor may be NULL to only count.
+	CRP_PLUGIN_API size_t crpClassMemberForEachFlatAttribute(const CrpClassMember* member, CrpFlatAttributeVisitor visitor, void* userData);
 
 	CRP_PLUGIN_API const char* crpClassMethodGetName(const CrpClassMethod* method);
 	CRP_PLUGIN_API const char* crpClassMethodGetBase(const CrpClassMethod* method);

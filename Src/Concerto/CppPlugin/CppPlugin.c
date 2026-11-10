@@ -466,20 +466,30 @@ static void BeforeClassGeneration(const CrpClass* cls, CrpGenerationContext* ctx
 	}
 }
 
-// Emits every attribute of the member (nested TOML tables as dotted keys, e.g. "Min.x") on
-// "<varName>_mv", which the caller declares only when the member has attributes.
+typedef struct MemberAttributeEmitter
+{
+	CrpGenerationContext* ctx;
+	char target[600];
+} MemberAttributeEmitter;
+
+static void EmitMemberAttribute(const char* key, const char* value, void* userData)
+{
+	MemberAttributeEmitter* emitter = (MemberAttributeEmitter*)userData;
+	EmitAddAttribute(emitter->ctx, emitter->target, key, value);
+}
+
+// Emits the member attributes on "<varName>_mv", which the caller declares.
 static void EmitMemberAttributes(CrpGenerationContext* ctx, const CrpClassMember* member, const char* varName)
 {
-	char target[600];
-	snprintf(target, sizeof(target), "%s_mv->", varName);
-	const size_t attrCount = crpClassMemberFlattenAttributes(member);
-	for (size_t i = 0; i < attrCount; ++i)
-	{
-		const char* key = crpClassMemberGetFlatAttributeKey(i);
-		const char* val = crpClassMemberGetFlatAttributeValue(i);
-		if (key && val)
-			EmitAddAttribute(ctx, target, key, val);
-	}
+	MemberAttributeEmitter emitter;
+	emitter.ctx = ctx;
+	snprintf(emitter.target, sizeof(emitter.target), "%s_mv->", varName);
+	crpClassMemberForEachFlatAttribute(member, EmitMemberAttribute, &emitter);
+}
+
+static int MemberHasAttributes(const CrpClassMember* member)
+{
+	return crpClassMemberForEachFlatAttribute(member, NULL, NULL) > 0;
 }
 
 static void OnMemberGeneration(const CrpClassMember* member, CrpGenerationContext* ctx)
@@ -487,7 +497,7 @@ static void OnMemberGeneration(const CrpClassMember* member, CrpGenerationContex
 	const char* memberName = crpClassMemberGetName(member);
 	const char* memberType = crpClassMemberGetType(member);
 	int32_t isNative = crpClassMemberIsNative(member);
-	const int hasAttributes = crpClassMemberFlattenAttributes(member) > 0;
+	const int hasAttributes = MemberHasAttributes(member);
 
 	if (isNative)
 	{
@@ -979,7 +989,7 @@ static void BeforeGenericClassGeneration(const CrpClass* cls, CrpGenerationConte
 				const char* memberName = crpClassMemberGetName(member);
 				const char* memberType = crpClassMemberGetType(member);
 				int32_t isNative = crpClassMemberIsNative(member);
-				const int hasAttributes = crpClassMemberFlattenAttributes(member) > 0;
+				const int hasAttributes = MemberHasAttributes(member);
 				char memberVar[512];
 				SanitizeIdentifier(memberName, memberVar, sizeof(memberVar));
 
