@@ -83,6 +83,8 @@ namespace cct::refl
 
 		static inline bool IsInstanceOf(const Class& klass);
 
+		/// Member variable indices are local to the dynamic class (see Class::GetMemberVariables()).
+		/// Inherited members are only reachable by name.
 		[[nodiscard]] inline const cct::refl::Object* GetMemberVariable(std::size_t index) const;
 		[[nodiscard]] inline cct::refl::Object* GetMemberVariable(std::size_t index);
 
@@ -99,6 +101,7 @@ namespace cct::refl
 		template<typename T>
 		[[nodiscard]] const T* GetMemberVariable(std::string_view name) const;
 
+		/// Native member indices are global: the base class native members come first.
 		template<typename T>
 		[[nodiscard]] T* GetNativeMemberVariable(std::size_t index);
 		template<typename T>

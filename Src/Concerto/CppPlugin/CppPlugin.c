@@ -125,6 +125,75 @@ static void SanitizeSpecialization(const char* src, char* dest, size_t destSize)
 	dest[i] = '\0';
 }
 
+// Writes src as the body of a C++ narrow string literal. Quotes and backslashes are escaped, and
+// every control or non-ASCII byte becomes a 3-digit octal escape (unlike \x, it cannot swallow the
+// characters that follow, and it keeps UTF-8 bytes intact whatever the compiler's source charset).
+// Returns 0 (with dest emptied) if dest is too small.
+static int EscapeStringLiteral(const char* src, char* dest, size_t destSize)
+{
+	if (!dest || destSize == 0)
+		return 0;
+
+	size_t out = 0;
+	for (const unsigned char* p = (const unsigned char*)(src ? src : ""); *p; ++p)
+	{
+		char escaped[5];
+		size_t len = 1;
+		if (*p == '"' || *p == '\\')
+		{
+			escaped[0] = '\\';
+			escaped[1] = (char)*p;
+			len = 2;
+		}
+		else if (*p < 0x20 || *p >= 0x7F)
+		{
+			snprintf(escaped, sizeof(escaped), "\\%03o", (unsigned int)*p);
+			len = 4;
+		}
+		else
+		{
+			escaped[0] = (char)*p;
+		}
+
+		if (out + len >= destSize)
+		{
+			dest[0] = '\0';
+			return 0;
+		}
+		memcpy(dest + out, escaped, len);
+		out += len;
+	}
+	dest[out] = '\0';
+	return 1;
+}
+
+// Returns a heap-allocated escaped copy of src (see EscapeStringLiteral), or NULL on allocation failure.
+static char* AllocEscapedStringLiteral(const char* src)
+{
+	const size_t size = strlen(src ? src : "") * 4 + 1; // worst case: every byte becomes \ooo
+	char* escaped = (char*)malloc(size);
+	if (escaped && !EscapeStringLiteral(src, escaped, size))
+	{
+		free(escaped);
+		return NULL;
+	}
+	return escaped;
+}
+
+// Emits "<target>AddAttribute("<key>", "<value>");" with both strings escaped.
+// target is the call prefix, e.g. "" or "foo_mv->".
+static void EmitAddAttribute(CrpGenerationContext* ctx, const char* target, const char* key, const char* value)
+{
+	char* escapedKey = AllocEscapedStringLiteral(key);
+	char* escapedValue = AllocEscapedStringLiteral(value);
+	if (escapedKey && escapedValue)
+		crpGenerationContextWrite(ctx, "%sAddAttribute(\"%s\", \"%s\");", target, escapedKey, escapedValue);
+	else
+		fprintf(stderr, "CppPlugin: out of memory while emitting attribute '%s'\n", key ? key : "<null>");
+	free(escapedKey);
+	free(escapedValue);
+}
+
 static int AppendToBuffer(char* dest, size_t destSize, const char* src)
 {
 	if (!dest || !src || destSize == 0)
@@ -387,7 +456,7 @@ static void BeforeClassGeneration(const CrpClass* cls, CrpGenerationContext* ctx
 					const char* val = crpClassGetAttributeValue(cls, i);
 					if (key && val)
 					{
-						crpGenerationContextWrite(ctx, "AddAttribute(\"%s\", \"%s\");", key, val);
+						EmitAddAttribute(ctx, "", key, val);
 					}
 				}
 			}
@@ -397,28 +466,30 @@ static void BeforeClassGeneration(const CrpClass* cls, CrpGenerationContext* ctx
 	}
 }
 
-static void EmitAttrCalls(CrpGenerationContext* ctx, const CrpClassMember* member,
-						  const char* varName, const char* attrName)
+typedef struct MemberAttributeEmitter
 {
-	if (crpClassMemberAttributeIsTable(member, attrName))
-	{
-		size_t n = crpClassMemberGetAttributeTableKeyCount(member, attrName);
-		for (size_t k = 0; k < n; k++)
-		{
-			const char* key = crpClassMemberGetAttributeTableKey(member, attrName, k);
-			const char* val = crpClassMemberGetAttributeTableValue(member, attrName, key);
-			if (key && val)
-				crpGenerationContextWrite(ctx, "%s_mv->AddAttribute(\"%s.%s\", \"%s\");", varName, attrName, key, val);
-		}
-	}
-	else
-	{
-		const char* val = crpClassMemberGetAttribute(member, attrName);
-		if (val)
-		{
-			crpGenerationContextWrite(ctx, "%s_mv->AddAttribute(\"%s\", \"%s\");", varName, attrName, val);
-		}
-	}
+	CrpGenerationContext* ctx;
+	char target[600];
+} MemberAttributeEmitter;
+
+static void EmitMemberAttribute(const char* key, const char* value, void* userData)
+{
+	MemberAttributeEmitter* emitter = (MemberAttributeEmitter*)userData;
+	EmitAddAttribute(emitter->ctx, emitter->target, key, value);
+}
+
+// Emits the member attributes on "<varName>_mv", which the caller declares.
+static void EmitMemberAttributes(CrpGenerationContext* ctx, const CrpClassMember* member, const char* varName)
+{
+	MemberAttributeEmitter emitter;
+	emitter.ctx = ctx;
+	snprintf(emitter.target, sizeof(emitter.target), "%s_mv->", varName);
+	crpClassMemberForEachFlatAttribute(member, EmitMemberAttribute, &emitter);
+}
+
+static int MemberHasAttributes(const CrpClassMember* member)
+{
+	return crpClassMemberForEachFlatAttribute(member, NULL, NULL) > 0;
 }
 
 static void OnMemberGeneration(const CrpClassMember* member, CrpGenerationContext* ctx)
@@ -426,25 +497,17 @@ static void OnMemberGeneration(const CrpClassMember* member, CrpGenerationContex
 	const char* memberName = crpClassMemberGetName(member);
 	const char* memberType = crpClassMemberGetType(member);
 	int32_t isNative = crpClassMemberIsNative(member);
-	int32_t hasMin = crpClassMemberHasAttribute(member, "Min");
-	int32_t hasMax = crpClassMemberHasAttribute(member, "Max");
+	const int hasAttributes = MemberHasAttributes(member);
 
 	if (isNative)
 	{
-		if (hasMin || hasMax)
+		if (hasAttributes)
 		{
 			char nativeVar[512];
 			SanitizeIdentifier(memberName, nativeVar, sizeof(nativeVar));
 			crpGenerationContextWrite(ctx, "if (auto* %s_mv = AddNativeMemberVariable(\"%s\", cct::TypeId<%s>()))", nativeVar, ReflectedMemberName(memberName), memberType);
 			crpGenerationContextEnterScope(ctx);
-			if (hasMin)
-			{
-				EmitAttrCalls(ctx, member, nativeVar, "Min");
-			}
-			if (hasMax)
-			{
-				EmitAttrCalls(ctx, member, nativeVar, "Max");
-			}
+			EmitMemberAttributes(ctx, member, nativeVar);
 			crpGenerationContextLeaveScope(ctx, NULL);
 		}
 		else
@@ -475,18 +538,11 @@ static void OnMemberGeneration(const CrpClassMember* member, CrpGenerationContex
 		}
 		crpGenerationContextWrite(ctx, "CCT_ASSERT(%sClass != nullptr, \"Could not find class '%s'\");", classVar, memberType);
 
-		if (hasMin || hasMax)
+		if (hasAttributes)
 		{
 			crpGenerationContextWrite(ctx, "if (auto* %s_mv = AddMemberVariable(\"%s\", %sClass))", classVar, ReflectedMemberName(memberName), classVar);
 			crpGenerationContextEnterScope(ctx);
-			if (hasMin)
-			{
-				EmitAttrCalls(ctx, member, classVar, "Min");
-			}
-			if (hasMax)
-			{
-				EmitAttrCalls(ctx, member, classVar, "Max");
-			}
+			EmitMemberAttributes(ctx, member, classVar);
 			crpGenerationContextLeaveScope(ctx, NULL);
 		}
 		else
@@ -754,13 +810,15 @@ static void AfterClassGeneration(const CrpClass* cls, CrpGenerationContext* ctx)
 		crpGenerationContextWrite(ctx, "auto* %sMethod = new %s%sMethod(\"%s\"sv, cct::refl::GetClassByName(\"%s\"sv), { %s }, %zu);",
 								  methodName, className, methodName, methodName, returnType, paramsStr, i);
 		{
+			char methodTarget[512];
+			snprintf(methodTarget, sizeof(methodTarget), "%sMethod->", methodName);
 			const size_t attrCount = crpClassMethodFlattenAttributes(method);
 			for (size_t a = 0; a < attrCount; ++a)
 			{
 				const char* key = crpClassMethodGetFlatAttributeKey(a);
 				const char* val = crpClassMethodGetFlatAttributeValue(a);
 				if (key && val)
-					crpGenerationContextWrite(ctx, "%sMethod->AddAttribute(\"%s\", \"%s\");", methodName, key, val);
+					EmitAddAttribute(ctx, methodTarget, key, val);
 			}
 			if (paramCount >= 1)
 			{
@@ -931,14 +989,30 @@ static void BeforeGenericClassGeneration(const CrpClass* cls, CrpGenerationConte
 				const char* memberName = crpClassMemberGetName(member);
 				const char* memberType = crpClassMemberGetType(member);
 				int32_t isNative = crpClassMemberIsNative(member);
+				const int hasAttributes = MemberHasAttributes(member);
+				char memberVar[512];
+				SanitizeIdentifier(memberName, memberVar, sizeof(memberVar));
 
 				if (isNative)
 				{
-					crpGenerationContextWrite(ctx, "AddNativeMemberVariable(\"%s\", cct::TypeId<%s>());", ReflectedMemberName(memberName), memberType);
+					if (hasAttributes)
+						crpGenerationContextWrite(ctx, "if (auto* %s_mv = AddNativeMemberVariable(\"%s\", cct::TypeId<%s>()))", memberVar, ReflectedMemberName(memberName), memberType);
+					else
+						crpGenerationContextWrite(ctx, "AddNativeMemberVariable(\"%s\", cct::TypeId<%s>());", ReflectedMemberName(memberName), memberType);
 				}
 				else
 				{
-					crpGenerationContextWrite(ctx, "AddMemberVariable(\"%s\", cct::refl::GetClassByName(\"%s\"sv));", ReflectedMemberName(memberName), memberType);
+					if (hasAttributes)
+						crpGenerationContextWrite(ctx, "if (auto* %s_mv = AddMemberVariable(\"%s\", cct::refl::GetClassByName(\"%s\"sv)))", memberVar, ReflectedMemberName(memberName), memberType);
+					else
+						crpGenerationContextWrite(ctx, "AddMemberVariable(\"%s\", cct::refl::GetClassByName(\"%s\"sv));", ReflectedMemberName(memberName), memberType);
+				}
+
+				if (hasAttributes)
+				{
+					crpGenerationContextEnterScope(ctx);
+					EmitMemberAttributes(ctx, member, memberVar);
+					crpGenerationContextLeaveScope(ctx, NULL);
 				}
 			}
 		}
