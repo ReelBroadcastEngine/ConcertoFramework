@@ -128,6 +128,28 @@ namespace cct::sample
 		CCT_OBJECT(JsonSample);
 	};
 
+	// Member attributes beyond Min/Max must reach the runtime: arbitrary keys (Id), nested tables
+	// (dotted keys), full-precision numbers, and keys/values that need escaping in generated C++.
+	class CCT_REFL_TESTS_CLASS() MemberAttributeSample : public cct::refl::Object
+	{
+	public:
+		MemberAttributeSample() :
+			m_value(7)
+		{
+		}
+
+		CCT_REFL_TESTS_MEMBER("Id = \"sample.value\"", "Min = 0", "Max = 100", "Step = 0.1234567891",
+							  "Range = { Lo = 1, Hi = 2.5 }",
+							  "Label = \"quote \\\" backslash \\\\ tab \\t newline \\n braces {} percent %s\"",
+							  "Unicode = \"caf\\u00e9\"", "\"quoted \\\"key\\\"\" = true")
+		cct::refl::Int32 m_value;
+
+		CCT_REFL_TESTS_NATIVE_MEMBER("Id = \"sample.native\"", "Min = -5")
+		cct::Int32 m_native = 3;
+
+		CCT_OBJECT(MemberAttributeSample);
+	};
+
 	// Generic class with multiple type parameters (runtime parameterized)
 	class CCT_REFL_TESTS_CLASS() CCT_GENERIC_CLASS() GenericPair : public cct::refl::Object
 	{

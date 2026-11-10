@@ -4,9 +4,16 @@
 
 #include "Concerto/PackageGenerator/Plugin/PluginApi.h"
 
+#include <algorithm>
+#include <array>
+#include <charconv>
 #include <cstdarg>
 #include <random>
 #include <ranges>
+#include <string>
+#include <system_error>
+#include <utility>
+#include <vector>
 
 #include <Concerto/Profiler/Profiler.hpp>
 
@@ -496,6 +503,62 @@ extern "C"
 		if (val.is_boolean())
 			return val.as_boolean() ? "true" : "false";
 		return nullptr;
+	}
+
+	static std::vector<std::pair<std::string, std::string>> g_flatMemberAttrs;
+
+	static void FlattenMemberToml(const TomlAttributes& value, const std::string& prefix)
+	{
+		if (value.is_table())
+		{
+			for (const auto& [k, v] : value.as_table())
+				FlattenMemberToml(v, prefix.empty() ? k : prefix + "." + k);
+			return;
+		}
+		if (prefix.empty())
+			return;
+		if (value.is_string())
+			g_flatMemberAttrs.emplace_back(prefix, value.as_string());
+		else if (value.is_floating())
+		{
+			// Shortest representation that round-trips, unlike "%g" (6 significant digits).
+			std::array<char, 64> buffer = {};
+			const auto [end, error] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value.as_floating());
+			if (error == std::errc())
+				g_flatMemberAttrs.emplace_back(prefix, std::string(buffer.data(), end));
+		}
+		else if (value.is_integer())
+			g_flatMemberAttrs.emplace_back(prefix, std::to_string(value.as_integer()));
+		else if (value.is_boolean())
+			g_flatMemberAttrs.emplace_back(prefix, value.as_boolean() ? "true" : "false");
+	}
+
+	size_t crpClassMemberFlattenAttributes(const CrpClassMember* member)
+	{
+		CCT_AUTO_PROFILER_SCOPE();
+		g_flatMemberAttrs.clear();
+		if (!member)
+			return 0;
+		const auto* m = reinterpret_cast<const Class::Member*>(member);
+		if (m->tomlAttributes.is_table())
+			FlattenMemberToml(m->tomlAttributes, "");
+		// TOML tables are unordered; sort so the generated code is deterministic.
+		std::ranges::sort(g_flatMemberAttrs, {}, &std::pair<std::string, std::string>::first);
+		return g_flatMemberAttrs.size();
+	}
+
+	const char* crpClassMemberGetFlatAttributeKey(size_t index)
+	{
+		if (index >= g_flatMemberAttrs.size())
+			return nullptr;
+		return g_flatMemberAttrs[index].first.c_str();
+	}
+
+	const char* crpClassMemberGetFlatAttributeValue(size_t index)
+	{
+		if (index >= g_flatMemberAttrs.size())
+			return nullptr;
+		return g_flatMemberAttrs[index].second.c_str();
 	}
 
 	const char* crpClassMethodGetName(const CrpClassMethod* method)

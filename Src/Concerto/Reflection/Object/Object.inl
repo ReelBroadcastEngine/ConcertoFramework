@@ -107,11 +107,11 @@ namespace cct::refl
 	template<typename T>
 	T* Object::GetMemberVariable(std::size_t index)
 	{
-		Object* object = GetClass()->GetMemberVariable(index, *this);
+		Object* object = GetDynamicClass()->GetMemberVariable(index, *this);
 #ifdef CCT_DEBUG
 		if (dynamic_cast<T*>(object) == nullptr) [[unlikely]]
 		{
-			CCT_ASSERT_FALSE("'{}' is not convertible to '{}'", this->GetClass()->GetName(), T::GetClass()->GetName());
+			CCT_ASSERT_FALSE("'{}' is not convertible to '{}'", GetDynamicClass()->GetName(), T::GetClass()->GetName());
 			return nullptr;
 		}
 #endif
@@ -121,11 +121,11 @@ namespace cct::refl
 	template<typename T>
 	const T* Object::GetMemberVariable(std::size_t index) const
 	{
-		Object* object = GetClass()->GetMemberVariable(index, *this);
+		Object* object = GetDynamicClass()->GetMemberVariable(index, *this);
 #ifdef CCT_DEBUG
 		if (dynamic_cast<T*>(object) == nullptr) [[unlikely]]
 		{
-			CCT_ASSERT_FALSE("'{}' is not convertible to '{}'", this->GetClass()->GetName(), T::GetClass()->GetName());
+			CCT_ASSERT_FALSE("'{}' is not convertible to '{}'", GetDynamicClass()->GetName(), T::GetClass()->GetName());
 			return nullptr;
 		}
 #endif
@@ -135,7 +135,7 @@ namespace cct::refl
 	template<typename T>
 	T* Object::GetMemberVariable(std::string_view name)
 	{
-		const MemberVariable* memberVariable = GetClass()->GetMemberVariable(name);
+		const MemberVariable* memberVariable = GetDynamicClass()->GetMemberVariable(name);
 		if (memberVariable == nullptr)
 			return nullptr;
 		return GetMemberVariable<T>(memberVariable->GetIndex());
