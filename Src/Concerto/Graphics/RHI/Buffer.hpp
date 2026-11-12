@@ -10,6 +10,7 @@
 
 #include <Concerto/Core/FunctionRef/FunctionRef.hpp>
 
+#include "Concerto/Graphics/RHI/BufferMemoryProperties.hpp"
 #include "Concerto/Graphics/RHI/Defines.hpp"
 
 namespace cct::gfx::rhi
@@ -23,6 +24,7 @@ namespace cct::gfx::rhi
 
 		virtual bool Map(Byte** data) = 0;
 		virtual void UnMap() = 0;
+		[[nodiscard]] virtual BufferMemoryProperties GetMemoryProperties() const = 0;
 		virtual void RecordReadback(CommandBuffer& /*cmd*/)
 		{
 		}

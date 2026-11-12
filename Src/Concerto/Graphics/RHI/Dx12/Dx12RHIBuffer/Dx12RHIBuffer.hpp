@@ -22,6 +22,7 @@ namespace cct::gfx::rhi
 		void RecordReadback(CommandBuffer& cmd) override;
 		bool Map(Byte** data) override;
 		void UnMap() override;
+		[[nodiscard]] BufferMemoryProperties GetMemoryProperties() const override;
 
 		[[nodiscard]] ID3D12Resource* GetResource() const
 		{

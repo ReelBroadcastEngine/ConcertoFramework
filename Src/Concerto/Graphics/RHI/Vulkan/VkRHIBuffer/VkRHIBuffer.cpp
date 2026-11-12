@@ -35,4 +35,15 @@ namespace cct::gfx::rhi
 		}
 		vk::Buffer::UnMap();
 	}
+
+	BufferMemoryProperties VkRHIBuffer::GetMemoryProperties() const
+	{
+		const VkMemoryPropertyFlags flags = GetMemoryPropertyFlags();
+		return BufferMemoryProperties{
+			.m_deviceLocal = (flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0,
+			.m_hostVisible = (flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0,
+			.m_hostCoherent = (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0,
+			.m_hostCached = (flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0,
+		};
+	}
 } // namespace cct::gfx::rhi

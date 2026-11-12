@@ -51,6 +51,7 @@ namespace cct::gfx::vk
 		[[nodiscard]] Allocator& GetAllocator() const;
 		[[nodiscard]] std::size_t GetAllocatedSize() const;
 		[[nodiscard]] VkBufferUsageFlags GetUsage() const;
+		[[nodiscard]] VkMemoryPropertyFlags GetMemoryPropertyFlags() const;
 
 	private:
 		UInt32 m_mapCount = 0;

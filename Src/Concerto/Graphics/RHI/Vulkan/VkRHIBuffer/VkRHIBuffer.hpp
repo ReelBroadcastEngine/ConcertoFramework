@@ -18,6 +18,7 @@ namespace cct::gfx::rhi
 
 		bool Map(Byte** data) override;
 		void UnMap() override;
+		[[nodiscard]] BufferMemoryProperties GetMemoryProperties() const override;
 
 	private:
 		VkRHIDevice& m_device;

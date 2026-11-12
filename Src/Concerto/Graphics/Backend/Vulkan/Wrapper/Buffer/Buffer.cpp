@@ -147,4 +147,13 @@ namespace cct::gfx::vk
 	{
 		return m_usage;
 	}
+
+	VkMemoryPropertyFlags Buffer::GetMemoryPropertyFlags() const
+	{
+		CCT_ASSERT(IsValid(), "Invalid object state, 'Create' must be called");
+
+		VkMemoryPropertyFlags flags = 0;
+		vmaGetAllocationMemoryProperties(*m_allocator->Get(), m_allocation, &flags);
+		return flags;
+	}
 } // namespace cct::gfx::vk

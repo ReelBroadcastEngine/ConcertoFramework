@@ -131,6 +131,24 @@ namespace cct::gfx::rhi
 		return SUCCEEDED(target->Map(0, &readRange, reinterpret_cast<void**>(data)));
 	}
 
+	BufferMemoryProperties Dx12RHIBuffer::GetMemoryProperties() const
+	{
+		ID3D12Resource* mapped = m_readbackResource ? m_readbackResource.Get() : m_resource.Get();
+		D3D12_HEAP_PROPERTIES heap{};
+		D3D12_HEAP_FLAGS heapFlags{};
+		if (mapped == nullptr || FAILED(mapped->GetHeapProperties(&heap, &heapFlags)))
+			return {};
+		if (heap.Type != D3D12_HEAP_TYPE_CUSTOM)
+			heap = m_device->Get()->GetCustomHeapProperties(0, heap.Type);
+		const bool hostVisible = heap.CPUPageProperty != D3D12_CPU_PAGE_PROPERTY_NOT_AVAILABLE;
+		return BufferMemoryProperties{
+			.m_deviceLocal = heap.MemoryPoolPreference == D3D12_MEMORY_POOL_L1 || !hostVisible,
+			.m_hostVisible = hostVisible,
+			.m_hostCoherent = hostVisible,
+			.m_hostCached = heap.CPUPageProperty == D3D12_CPU_PAGE_PROPERTY_WRITE_BACK,
+		};
+	}
+
 	void Dx12RHIBuffer::UnMap()
 	{
 		if (!m_allowMapping || !m_resource)
