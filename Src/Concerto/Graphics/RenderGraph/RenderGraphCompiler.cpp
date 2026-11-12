@@ -5,6 +5,7 @@
 #include "Concerto/Graphics/RenderGraph/RenderGraphCompiler.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <queue>
 
 #include <Concerto/Core/Assert.hpp>
@@ -18,14 +19,23 @@ namespace cct::gfx::rhi
 		std::vector<RGPass>& passes,
 		RenderGraphResourceRegistry& registry,
 		Device& device,
-		RGTextureHandle finalOutput)
+		RGTextureHandle finalOutput,
+		RenderGraphStatistics& statistics)
 	{
 		if (passes.empty())
 			return {};
 
+		using Clock = std::chrono::steady_clock;
+		const Clock::time_point dependencyStart = Clock::now();
 		BuildDependencies(passes);
+		const Clock::time_point cullingStart = Clock::now();
 		CullPasses(passes, finalOutput);
+		const Clock::time_point sortStart = Clock::now();
 		const std::vector<UInt32> order = TopologicalSort(passes);
+		const Clock::time_point sortEnd = Clock::now();
+		statistics.m_dependencyTime += cullingStart - dependencyStart;
+		statistics.m_cullingTime += sortStart - cullingStart;
+		statistics.m_sortTime += sortEnd - sortStart;
 
 		std::vector<RGCompiledPass> compiled;
 		compiled.reserve(order.size());
@@ -60,7 +70,7 @@ namespace cct::gfx::rhi
 			cp.passIndex = passIdx;
 
 			if (pass.type == RGPassType::Graphics)
-				BuildRenderPassObjects(cp, pass, passIdx, alreadyWritten, registry, device);
+				BuildRenderPassObjects(cp, pass, passIdx, alreadyWritten, registry, device, statistics);
 
 			compiled.push_back(std::move(cp));
 
@@ -287,7 +297,8 @@ namespace cct::gfx::rhi
 													 UInt32 passIdx,
 													 const std::unordered_set<UInt16>& alreadyWritten,
 													 const RenderGraphResourceRegistry& registry,
-													 Device& device)
+													 Device& device,
+													 RenderGraphStatistics& statistics)
 	{
 		std::vector<RenderPass::Attachment> attachments;
 		std::vector<AttachmentReference> colorRefs;
@@ -365,10 +376,13 @@ namespace cct::gfx::rhi
 		std::vector<RenderPass::SubPassDescription> subpassVec{subpass};
 		std::vector<RenderPass::SubPassDependency> depsVec{deps[0], deps[1]};
 
+		const auto creationStart = std::chrono::steady_clock::now();
 		compiled.renderPass = device.CreateRenderPass(
 			std::span<RenderPass::Attachment>(attachments),
 			std::span<RenderPass::SubPassDescription>(subpassVec),
 			std::span<RenderPass::SubPassDependency>(depsVec));
+		statistics.m_renderPassCreationTime += std::chrono::steady_clock::now() - creationStart;
+		++statistics.m_renderPassesCreated;
 
 		(void)passIdx;
 	}

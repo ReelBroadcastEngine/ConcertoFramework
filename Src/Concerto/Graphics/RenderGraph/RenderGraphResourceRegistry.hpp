@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "Concerto/Graphics/RenderGraph/RenderGraphResource.hpp"
+#include "Concerto/Graphics/RenderGraph/RenderGraphStatistics.hpp"
 #include "Concerto/Graphics/RHI/Buffer.hpp"
 #include "Concerto/Graphics/RHI/Defines.hpp"
 #include "Concerto/Graphics/RHI/Enums.hpp"
@@ -53,7 +54,7 @@ namespace cct::gfx::rhi
 
 		void UpdateImportedTexture(RGTextureHandle handle, std::shared_ptr<Texture> texture, ImageLayout currentLayout);
 
-		void Allocate(Device& device);
+		void Allocate(Device& device, RenderGraphStatistics& statistics);
 
 		// Extract physical resources from transient entries into caller-owned snapshots
 		// and clear the entries so the next Allocate() can re-populate them.

@@ -63,7 +63,7 @@ namespace cct::gfx::rhi
 		entry.initialLayout = currentLayout;
 	}
 
-	void RenderGraphResourceRegistry::Allocate(Device& device)
+	void RenderGraphResourceRegistry::Allocate(Device& device, RenderGraphStatistics& statistics)
 	{
 		for (auto& entry : m_textures)
 		{
@@ -77,6 +77,7 @@ namespace cct::gfx::rhi
 				entry.physical = pool.back().first;
 				entry.currentLayout = pool.back().second;
 				pool.pop_back();
+				++statistics.m_texturesReused;
 			}
 			else
 			{
@@ -89,6 +90,7 @@ namespace cct::gfx::rhi
 										   entry.desc.format,
 										   static_cast<Int32>(entry.desc.width),
 										   static_cast<Int32>(entry.desc.height));
+				++statistics.m_texturesCreated;
 				CCT_ASSERT(entry.physical != nullptr,
 						   "RenderGraphResourceRegistry::Allocate: Create{}Texture failed for '{}'",
 						   entry.desc.storage ? "Storage" : "", entry.desc.name);
@@ -108,6 +110,7 @@ namespace cct::gfx::rhi
 				entry.currentStage = pool.back().lastStage;
 				entry.currentAccess = pool.back().lastAccess;
 				pool.pop_back();
+				++statistics.m_buffersReused;
 			}
 			else
 			{
@@ -115,6 +118,7 @@ namespace cct::gfx::rhi
 				CCT_ASSERT(uniqueBuf != nullptr,
 						   "RenderGraphResourceRegistry::Allocate: CreateBuffer failed for '{}'", entry.desc.name);
 				entry.physical = std::shared_ptr<Buffer>(std::move(uniqueBuf));
+				++statistics.m_buffersCreated;
 			}
 		}
 	}

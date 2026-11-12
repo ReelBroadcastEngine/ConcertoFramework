@@ -17,10 +17,12 @@
 #include "Concerto/Graphics/RenderGraph/RenderGraphPass.hpp"
 #include "Concerto/Graphics/RenderGraph/RenderGraphResource.hpp"
 #include "Concerto/Graphics/RenderGraph/RenderGraphResourceRegistry.hpp"
+#include "Concerto/Graphics/RenderGraph/RenderGraphStatistics.hpp"
 #include "Concerto/Graphics/RHI/CommandBuffer.hpp"
 #include "Concerto/Graphics/RHI/Defines.hpp"
 #include "Concerto/Graphics/RHI/Device.hpp"
 #include "Concerto/Graphics/RHI/FrameBuffer.hpp"
+#include "Concerto/Graphics/RHI/QueryPool.hpp"
 
 namespace cct::gfx::rhi
 {
@@ -114,6 +116,19 @@ namespace cct::gfx::rhi
 		// Debug: write graph as text to the given stream.
 		void DumpGraph(std::ostream& out) const;
 
+		[[nodiscard]] const RenderGraphStatistics& GetStatistics() const;
+
+		// Measures the GPU time of the passes: while pool is set, Execute resets queries [0, GetTimestampQueryCount()) of
+		// pool and writes a timestamp before the first pass and after each pass, unless pool has fewer queries. Pass
+		// nullptr to stop. pool must outlive its use by the graph and its submissions.
+		void SetTimestampQueryPool(QueryPool* pool);
+		// The queries the last compilation needs: one per compiled pass, plus one.
+		[[nodiscard]] UInt32 GetTimestampQueryCount() const;
+		// Once the submission that executed the last Execute has completed and before Clear: adds the GPU time of its
+		// passes to the statistics, by pass type. Returns false, adding nothing, when that Execute wrote no timestamps or
+		// they are not available.
+		bool ResolveTimestamps();
+
 	private:
 		// Members are destroyed in reverse declaration order, so this list is ordered
 		// dependencies-first: framebuffers must go before the views they reference,
@@ -143,6 +158,11 @@ namespace cct::gfx::rhi
 		Vector3f m_clearColor{0.F, 0.F, 0.F};
 		bool m_dirty = true;
 		FrameBuffer* m_currentFrameBuffer = nullptr; // active framebuffer across a merge group
+		RenderGraphStatistics m_statistics;
+		QueryPool* m_timestampPool = nullptr;
+		// The passes timed by the last Execute, in recording order.
+		std::vector<RGPassType> m_timedPassTypes;
+		std::vector<UInt64> m_timestampTicks;
 	};
 } // namespace cct::gfx::rhi
 

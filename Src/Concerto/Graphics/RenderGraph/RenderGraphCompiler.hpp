@@ -12,6 +12,7 @@
 
 #include "Concerto/Graphics/RenderGraph/RenderGraphPass.hpp"
 #include "Concerto/Graphics/RenderGraph/RenderGraphResource.hpp"
+#include "Concerto/Graphics/RenderGraph/RenderGraphStatistics.hpp"
 #include "Concerto/Graphics/RHI/Defines.hpp"
 #include "Concerto/Graphics/RHI/Enums.hpp"
 
@@ -27,7 +28,8 @@ namespace cct::gfx::rhi
 			std::vector<RGPass>& passes,
 			RenderGraphResourceRegistry& registry,
 			Device& device,
-			RGTextureHandle finalOutput);
+			RGTextureHandle finalOutput,
+			RenderGraphStatistics& statistics);
 
 		// Returns the required ImageLayout for a given texture usage. A Compute pass writes
 		// storage images and reads them in ImageLayout::General; a sampled (non-storage)
@@ -52,7 +54,7 @@ namespace cct::gfx::rhi
 		std::vector<UInt32> TopologicalSort(const std::vector<RGPass>& passes);
 		void BuildRenderPassObjects(RGCompiledPass& compiled, RGPass& pass,
 									UInt32 passIdx, const std::unordered_set<UInt16>& alreadyWritten,
-									const RenderGraphResourceRegistry& registry, Device& device);
+									const RenderGraphResourceRegistry& registry, Device& device, RenderGraphStatistics& statistics);
 
 		std::unordered_map<UInt16, UInt32> m_textureLastWriter; // texIdx → last writer passIdx
 		std::unordered_map<UInt16, UInt32> m_bufferLastWriter;

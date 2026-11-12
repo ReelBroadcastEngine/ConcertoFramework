@@ -4,8 +4,10 @@
 
 #include "Concerto/Graphics/RenderGraph/RenderGraph.hpp"
 
+#include <chrono>
 #include <format>
 #include <ostream>
+#include <span>
 #include <stdexcept>
 
 #include <Concerto/Core/Assert.hpp>
@@ -14,6 +16,11 @@
 
 namespace cct::gfx::rhi
 {
+	namespace
+	{
+		using Clock = std::chrono::steady_clock;
+	} // namespace
+
 	RenderGraph::RenderGraph(Device& device, UInt32 maxFramesInFlight) :
 		m_device(device),
 		m_maxFramesInFlight(maxFramesInFlight)
@@ -108,9 +115,12 @@ namespace cct::gfx::rhi
 
 	void RenderGraph::Compile()
 	{
+		const Clock::time_point start = Clock::now();
 		RetireCompiledPasses();
-		m_compiledPasses = m_compiler.Compile(m_passes, m_registry, m_device, m_finalOutput);
+		m_compiledPasses = m_compiler.Compile(m_passes, m_registry, m_device, m_finalOutput, m_statistics);
 		m_dirty = false;
+		++m_statistics.m_compilations;
+		m_statistics.m_compileTime += Clock::now() - start;
 	}
 
 	void RenderGraph::AllocateResources()
@@ -118,7 +128,9 @@ namespace cct::gfx::rhi
 		if (m_dirty)
 			Compile();
 
-		m_registry.Allocate(m_device);
+		const Clock::time_point start = Clock::now();
+		m_registry.Allocate(m_device, m_statistics);
+		m_statistics.m_allocationTime += Clock::now() - start;
 	}
 
 	Texture& RenderGraph::GetTexture(RGTextureHandle handle)
@@ -163,6 +175,16 @@ namespace cct::gfx::rhi
 	void RenderGraph::Execute(CommandBuffer& cmd, UInt32 frameWidth, UInt32 frameHeight)
 	{
 		AllocateResources();
+		const Clock::time_point recordStart = Clock::now();
+		++m_statistics.m_executions;
+		const UInt32 timestampCount = GetTimestampQueryCount();
+		const bool timed = m_timestampPool != nullptr && m_timestampPool->GetCapacity() >= timestampCount;
+		m_timedPassTypes.clear();
+		if (timed)
+		{
+			cmd.ResetQueries(*m_timestampPool, 0, timestampCount);
+			cmd.WriteTimestamp(*m_timestampPool, 0);
+		}
 
 		RenderPass* activeRenderPass = nullptr;
 
@@ -271,6 +293,7 @@ namespace cct::gfx::rhi
 
 				if (!cachedFrameBuffer)
 				{
+					const Clock::time_point frameBufferStart = Clock::now();
 					std::vector<std::unique_ptr<TextureView>> views;
 					views.reserve(attachmentIdentity.size());
 
@@ -297,9 +320,11 @@ namespace cct::gfx::rhi
 					RGCompiledPass::CachedFrameBuffer newEntry;
 					newEntry.attachmentIdentity = attachmentIdentity;
 					newEntry.frameBuffer = m_device.CreateFrameBuffer(fbWidth, fbHeight, *compiled.renderPass, views);
+					++m_statistics.m_frameBuffersCreated;
 					newEntry.attachmentViews = std::move(views);
 					compiled.frameBufferCache.push_back(std::move(newEntry));
 					cachedFrameBuffer = &compiled.frameBufferCache.back();
+					m_statistics.m_frameBufferCreationTime += Clock::now() - frameBufferStart;
 				}
 
 				m_currentFrameBuffer = cachedFrameBuffer->frameBuffer.get();
@@ -318,6 +343,12 @@ namespace cct::gfx::rhi
 				m_currentFrameBuffer = nullptr;
 				activeRenderPass = nullptr;
 			}
+
+			if (timed)
+			{
+				m_timedPassTypes.push_back(pass.type);
+				cmd.WriteTimestamp(*m_timestampPool, static_cast<UInt32>(m_timedPassTypes.size()));
+			}
 		}
 
 		for (const auto& [_, pair] : m_registry.ExportLayouts())
@@ -332,10 +363,12 @@ namespace cct::gfx::rhi
 			cmd.PipelineBarrier(tex, current, exportLayout, srcStage, dstStage, srcAccess, dstAccess);
 			m_registry.SetCurrentLayout(handle, exportLayout);
 		}
+		m_statistics.m_recordTime += Clock::now() - recordStart;
 	}
 
 	void RenderGraph::Reset()
 	{
+		const Clock::time_point start = Clock::now();
 		m_pendingFrames.push_back(std::move(m_retired));
 		m_retired = {};
 
@@ -347,6 +380,7 @@ namespace cct::gfx::rhi
 		}
 
 		m_registry.Reset();
+		m_statistics.m_resetTime += Clock::now() - start;
 	}
 
 	void RenderGraph::SetTextureLayout(RGTextureHandle handle, ImageLayout layout)
@@ -371,6 +405,7 @@ namespace cct::gfx::rhi
 
 	void RenderGraph::Clear()
 	{
+		const Clock::time_point start = Clock::now();
 		m_registry.ExtractTransients(m_retired.transientTextures, m_retired.transientBuffers);
 		RetireCompiledPasses();
 		m_passes.clear();
@@ -378,6 +413,62 @@ namespace cct::gfx::rhi
 		m_registry.ClearEntries();
 		m_finalOutput = {};
 		m_dirty = true;
+		m_statistics.m_clearTime += Clock::now() - start;
+	}
+
+	const RenderGraphStatistics& RenderGraph::GetStatistics() const
+	{
+		return m_statistics;
+	}
+
+	void RenderGraph::SetTimestampQueryPool(QueryPool* pool)
+	{
+		m_timestampPool = pool;
+		m_timedPassTypes.clear();
+	}
+
+	UInt32 RenderGraph::GetTimestampQueryCount() const
+	{
+		return static_cast<UInt32>(m_compiledPasses.size()) + 1;
+	}
+
+	bool RenderGraph::ResolveTimestamps()
+	{
+		if (m_timestampPool == nullptr || m_timedPassTypes.empty())
+			return false;
+		m_timestampTicks.resize(m_timedPassTypes.size() + 1);
+		const bool available = m_timestampPool->ReadTimestamps(0, m_timestampTicks);
+		const std::vector<RGPassType> passTypes = std::move(m_timedPassTypes);
+		m_timedPassTypes.clear();
+		if (!available)
+			return false;
+
+		const double period = m_timestampPool->GetTimestampPeriod();
+		const auto toDuration = [period](UInt64 begin, UInt64 end)
+		{
+			return std::chrono::nanoseconds{end > begin ? static_cast<std::chrono::nanoseconds::rep>(static_cast<double>(end - begin) * period) : 0};
+		};
+		std::span<const UInt64> ticks = m_timestampTicks;
+		m_statistics.m_gpuTime += toDuration(ticks.front(), ticks.back());
+		for (const RGPassType type : passTypes)
+		{
+			const std::chrono::nanoseconds passTime = toDuration(ticks.front(), ticks.subspan(1).front());
+			ticks = ticks.subspan(1);
+			switch (type)
+			{
+				case RGPassType::Graphics:
+					m_statistics.m_gpuGraphicsTime += passTime;
+					break;
+				case RGPassType::Compute:
+					m_statistics.m_gpuComputeTime += passTime;
+					break;
+				case RGPassType::Transfer:
+					m_statistics.m_gpuTransferTime += passTime;
+					break;
+			}
+		}
+		++m_statistics.m_gpuTimedExecutions;
+		return true;
 	}
 
 	void RenderGraph::DumpGraph(std::ostream& out) const
