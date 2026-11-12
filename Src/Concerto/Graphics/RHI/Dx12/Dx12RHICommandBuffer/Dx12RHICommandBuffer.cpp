@@ -19,6 +19,7 @@
 #include "Concerto/Graphics/RHI/Dx12/Dx12RHIFrameBuffer/Dx12RHIFrameBuffer.hpp"
 #include "Concerto/Graphics/RHI/Dx12/Dx12RHIPipeline/Dx12RHIPipeline.hpp"
 #include "Concerto/Graphics/RHI/Dx12/Dx12RHIPipelineLayout/Dx12RHIPipelineLayout.hpp"
+#include "Concerto/Graphics/RHI/Dx12/Dx12RHIQueryPool/Dx12RHIQueryPool.hpp"
 #include "Concerto/Graphics/RHI/Dx12/Dx12RHIRenderPass/Dx12RHIRenderPass.hpp"
 #include "Concerto/Graphics/RHI/Dx12/Dx12RHITexture/Dx12RHITexture.hpp"
 #include "Concerto/Graphics/RHI/Material/MaterialInstance.hpp"
@@ -400,6 +401,21 @@ namespace cct::gfx::rhi
 		srcLoc.PlacedFootprint.Footprint.RowPitch = static_cast<UINT>(rowLength * bytesPerTexel);
 
 		Get()->CopyTextureRegion(&dstLoc, static_cast<UINT>(region.m_x), static_cast<UINT>(region.m_y), 0, &srcLoc, nullptr);
+	}
+
+	void Dx12RHICommandBuffer::ResetQueries(QueryPool& pool, UInt32 first, UInt32 count)
+	{
+		Cast<Dx12RHIQueryPool&>(pool).MarkReset(first, count);
+	}
+
+	void Dx12RHICommandBuffer::WriteTimestamp(QueryPool& pool, UInt32 index)
+	{
+		if (!IsValid())
+			return;
+		auto& dx12Pool = Cast<Dx12RHIQueryPool&>(pool);
+		Get()->EndQuery(dx12Pool.GetQueryHeap(), D3D12_QUERY_TYPE_TIMESTAMP, index);
+		Get()->ResolveQueryData(dx12Pool.GetQueryHeap(), D3D12_QUERY_TYPE_TIMESTAMP, index, 1, dx12Pool.GetReadbackBuffer(), UInt64{index} * sizeof(UInt64));
+		dx12Pool.MarkWritten(index);
 	}
 
 	void Dx12RHICommandBuffer::Copy(const Texture& src, const Buffer& dst, UInt64 dstOffset)

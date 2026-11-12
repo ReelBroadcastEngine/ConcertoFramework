@@ -678,8 +678,52 @@ namespace cct::gfx::rhi
 		return std::make_unique<Dx12RHIFence>(*this);
 	}
 
-	std::unique_ptr<QueryPool> Dx12RHIDevice::CreateQueryPool()
+	std::unique_ptr<QueryPool> Dx12RHIDevice::CreateQueryPool(UInt32 timestampCount)
 	{
-		return std::make_unique<Dx12RHIQueryPool>(*this);
+		EnsureRenderQueue();
+		ID3D12CommandQueue* queue = GetRenderQueue();
+		UINT64 frequency = 0;
+		if (timestampCount == 0 || queue == nullptr || FAILED(queue->GetTimestampFrequency(&frequency)) || frequency == 0)
+			return nullptr;
+
+		D3D12_QUERY_HEAP_DESC heapDesc{};
+		heapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+		heapDesc.Count = timestampCount;
+		Microsoft::WRL::ComPtr<ID3D12QueryHeap> queryHeap;
+		HRESULT hr = Get()->CreateQueryHeap(&heapDesc, IID_PPV_ARGS(&queryHeap));
+		if (FAILED(hr))
+		{
+			CCT_RHI_LOG_WARN("Dx12RHIDevice: CreateQueryHeap failed ({:#x}); GPU timestamps unavailable", static_cast<unsigned>(hr));
+			return nullptr;
+		}
+
+		D3D12_HEAP_PROPERTIES heapProperties{};
+		heapProperties.Type = D3D12_HEAP_TYPE_READBACK;
+		D3D12_RESOURCE_DESC resourceDesc{};
+		resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+		resourceDesc.Width = sizeof(UInt64) * timestampCount;
+		resourceDesc.Height = 1;
+		resourceDesc.DepthOrArraySize = 1;
+		resourceDesc.MipLevels = 1;
+		resourceDesc.SampleDesc.Count = 1;
+		resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+		Microsoft::WRL::ComPtr<ID3D12Resource> readbackBuffer;
+		hr = Get()->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &resourceDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readbackBuffer));
+		if (FAILED(hr))
+		{
+			CCT_RHI_LOG_WARN("Dx12RHIDevice: query readback buffer creation failed ({:#x}); GPU timestamps unavailable", static_cast<unsigned>(hr));
+			return nullptr;
+		}
+		const D3D12_RANGE readRange{0, static_cast<SIZE_T>(resourceDesc.Width)};
+		void* mapped = nullptr;
+		hr = readbackBuffer->Map(0, &readRange, &mapped);
+		if (FAILED(hr))
+		{
+			CCT_RHI_LOG_WARN("Dx12RHIDevice: query readback buffer mapping failed ({:#x}); GPU timestamps unavailable", static_cast<unsigned>(hr));
+			return nullptr;
+		}
+		constexpr double NanosecondsPerSecond = 1e9;
+		return std::make_unique<Dx12RHIQueryPool>(std::move(queryHeap), std::move(readbackBuffer), static_cast<const UInt64*>(mapped), timestampCount,
+												  NanosecondsPerSecond / static_cast<double>(frequency));
 	}
 } // namespace cct::gfx::rhi

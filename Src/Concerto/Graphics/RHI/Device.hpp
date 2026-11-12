@@ -113,10 +113,9 @@ namespace cct::gfx::rhi
 
 		virtual Queue& GetQueue(rhi::QueueFamily family) = 0;
 		virtual std::unique_ptr<Fence> CreateFence() = 0;
-		virtual std::unique_ptr<QueryPool> CreateQueryPool()
-		{
-			return nullptr;
-		}
+		// A pool of timestamp queries for the graphics queue; nullptr when that queue does not support timestamps or the
+		// pool cannot be created.
+		virtual std::unique_ptr<QueryPool> CreateQueryPool(UInt32 timestampCount) = 0;
 		virtual std::shared_ptr<Texture> ImportTexture(const TextureImportInfo& /*info*/)
 		{
 			return nullptr;

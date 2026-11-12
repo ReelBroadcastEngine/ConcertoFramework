@@ -578,9 +578,31 @@ namespace cct::gfx::rhi
 		return std::make_shared<VkRHIPipeline>(std::move(vkPipeline), std::move(pipelineLayoutCopy));
 	}
 
-	std::unique_ptr<QueryPool> VkRHIDevice::CreateQueryPool()
+	std::unique_ptr<QueryPool> VkRHIDevice::CreateQueryPool(UInt32 timestampCount)
 	{
-		return std::make_unique<VkRHIQueryPool>(*this);
+		if (timestampCount == 0)
+			return nullptr;
+		const std::span<VkQueueFamilyProperties> families = GetPhysicalDevice().GetQueueFamilyProperties();
+		const UInt32 graphicsFamily = GetQueueFamilyIndex(vk::Queue::Type::Graphics);
+		if (graphicsFamily >= families.size())
+			return nullptr;
+		const UInt32 validBits = families.subspan(graphicsFamily).front().timestampValidBits;
+		const float timestampPeriod = GetPhysicalDevice().GetProperties().limits.timestampPeriod;
+		if (validBits == 0 || timestampPeriod <= 0.F)
+			return nullptr;
+
+		VkQueryPoolCreateInfo info{};
+		info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+		info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+		info.queryCount = timestampCount;
+		VkQueryPool queryPool = VK_NULL_HANDLE;
+		const VkResult result = vkCreateQueryPool(*Get(), &info, nullptr, &queryPool);
+		if (result != VK_SUCCESS)
+		{
+			CCT_RHI_LOG_WARN("VkRHIDevice: vkCreateQueryPool failed ({}); GPU timestamps unavailable", static_cast<int>(result));
+			return nullptr;
+		}
+		return std::make_unique<VkRHIQueryPool>(*this, queryPool, timestampCount, validBits, static_cast<double>(timestampPeriod));
 	}
 
 } // namespace cct::gfx::rhi

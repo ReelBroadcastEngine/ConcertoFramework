@@ -56,7 +56,7 @@ namespace cct::gfx::rhi
 
 		Queue& GetQueue(rhi::QueueFamily family) override;
 		std::unique_ptr<Fence> CreateFence() override;
-		std::unique_ptr<QueryPool> CreateQueryPool() override;
+		std::unique_ptr<QueryPool> CreateQueryPool(UInt32 timestampCount) override;
 		std::shared_ptr<Texture> ImportTexture(const rhi::TextureImportInfo& info) override;
 		std::shared_ptr<Texture> AdoptExternalImage(void* nativeImage, PixelFormat format, Int32 width, Int32 height, Int32 planeIndex = -1) override;
 		void SetShaderModuleSearchPath(const std::filesystem::path& path) override
