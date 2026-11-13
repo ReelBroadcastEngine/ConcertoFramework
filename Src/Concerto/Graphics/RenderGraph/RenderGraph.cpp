@@ -158,15 +158,34 @@ namespace cct::gfx::rhi
 
 	Result<void, RenderGraphError> RenderGraph::Execute(CommandBuffer& cmd, UInt32 frameWidth, UInt32 frameHeight)
 	{
+		m_timedPassTypes.clear();
 		Result<void, RenderGraphError> allocated = AllocateResources();
 		if (allocated.IsError())
+		{
 			return allocated;
+		}
 		const Clock::time_point recordStart = Clock::now();
+		const UInt64 execution = m_lastExecution + 1;
+		m_passFrameBuffers.assign(m_compiledPasses.size(), nullptr);
+		for (std::size_t index = 0; index < m_compiledPasses.size(); ++index)
+		{
+			const RGCompiledPass& compiled = m_compiledPasses.at(index);
+			if (compiled.renderPass == nullptr)
+			{
+				continue;
+			}
+			m_compiler.MarkRenderPassUsed(compiled.renderPass, execution);
+			FrameBuffer* frameBuffer = AcquireFrameBuffer(m_passes.at(compiled.passIndex), *compiled.renderPass, frameWidth, frameHeight, execution);
+			if (frameBuffer == nullptr)
+			{
+				return RenderGraphError::ResourceCreationFailed;
+			}
+			m_passFrameBuffers.at(index) = frameBuffer;
+		}
+		m_lastExecution = execution;
 		++m_statistics.m_executions;
-		const UInt64 execution = ++m_lastExecution;
 		const UInt32 timestampCount = GetTimestampQueryCount();
 		const bool timed = m_timestampPool != nullptr && m_timestampPool->GetCapacity() >= timestampCount;
-		m_timedPassTypes.clear();
 		if (timed)
 		{
 			cmd.ResetQueries(*m_timestampPool, 0, timestampCount);
@@ -174,6 +193,7 @@ namespace cct::gfx::rhi
 		}
 
 		RenderPass* activeRenderPass = nullptr;
+		FrameBuffer* currentFrameBuffer = nullptr;
 
 		struct BufferAccessState
 		{
@@ -261,21 +281,20 @@ namespace cct::gfx::rhi
 					emitBarriersForPass(mp);
 				}
 
-				m_compiler.MarkRenderPassUsed(compiled.renderPass, execution);
-				m_currentFrameBuffer = AcquireFrameBuffer(pass, *compiled.renderPass, frameWidth, frameHeight, execution).frameBuffer.get();
+				currentFrameBuffer = m_passFrameBuffers.at(i);
 				activeRenderPass = compiled.renderPass;
-				cmd.BeginRenderPass(*compiled.renderPass, *m_currentFrameBuffer, m_clearColor);
+				cmd.BeginRenderPass(*compiled.renderPass, *currentFrameBuffer, m_clearColor);
 			}
 
-			RenderGraphContext ctx(cmd, m_currentFrameBuffer, activeRenderPass, m_registry, frameWidth, frameHeight);
+			RenderGraphContext ctx(cmd, currentFrameBuffer, activeRenderPass, m_registry, frameWidth, frameHeight);
 			cmd.BeginDebugLabel(pass.name.c_str());
 			pass.execute(ctx);
 			cmd.EndDebugLabel();
 
-			if (pass.type == RGPassType::Graphics && compiled.closesRenderPass && m_currentFrameBuffer)
+			if (pass.type == RGPassType::Graphics && compiled.closesRenderPass && currentFrameBuffer != nullptr)
 			{
 				cmd.EndRenderPass();
-				m_currentFrameBuffer = nullptr;
+				currentFrameBuffer = nullptr;
 				activeRenderPass = nullptr;
 			}
 
@@ -342,11 +361,13 @@ namespace cct::gfx::rhi
 	void RenderGraph::Clear()
 	{
 		const Clock::time_point start = Clock::now();
-		const std::size_t retiredTextures = m_retired.transientTextures.size();
-		const std::size_t retiredBuffers = m_retired.transientBuffers.size();
-		m_registry.ExtractTransients(m_retired.transientTextures, m_retired.transientBuffers);
-		if (m_retired.transientTextures.size() != retiredTextures || m_retired.transientBuffers.size() != retiredBuffers)
-			m_retired.lastUse = std::max(m_retired.lastUse, m_lastExecution);
+		const std::size_t retiredTextures = m_retired.m_transientTextures.size();
+		const std::size_t retiredBuffers = m_retired.m_transientBuffers.size();
+		m_registry.ExtractTransients(m_retired.m_transientTextures, m_retired.m_transientBuffers);
+		if (m_retired.m_transientTextures.size() != retiredTextures || m_retired.m_transientBuffers.size() != retiredBuffers)
+		{
+			m_retired.m_lastUse = std::max(m_retired.m_lastUse, m_lastExecution);
+		}
 		m_passes.clear();
 		m_compiledPasses.clear();
 		m_registry.ClearEntries();
@@ -367,19 +388,23 @@ namespace cct::gfx::rhi
 		RenderGraphResidency residency;
 		for (UInt32 texture = 0; texture < m_registry.TextureCount(); ++texture)
 		{
-			const RGTextureHandle handle{static_cast<UInt16>(texture), 0};
+			const RGTextureHandle handle{.index = static_cast<UInt16>(texture), .version = 0};
 			if (!m_registry.IsImported(handle) && m_registry.GetTexturePointer(handle) != nullptr)
+			{
 				++residency.m_assignedTextures;
+			}
 		}
 		const auto countRetired = [&residency](const RetiredResources& retired)
 		{
-			residency.m_retiredTextures += retired.transientTextures.size();
-			residency.m_retiredFrameBuffers += retired.frameBuffers.size();
-			residency.m_retiredRenderPasses += retired.renderPasses.size();
+			residency.m_retiredTextures += retired.m_transientTextures.size();
+			residency.m_retiredFrameBuffers += retired.m_frameBuffers.size();
+			residency.m_retiredRenderPasses += retired.m_renderPasses.size();
 		};
 		countRetired(m_retired);
 		for (const RetiredResources& pending : m_pendingFrames)
+		{
 			countRetired(pending);
+		}
 		residency.m_pooledTextures = m_registry.GetPooledTextureCount();
 		residency.m_cachedFrameBuffers = m_frameBufferCache.size();
 		residency.m_cachedRenderPasses = m_compiler.GetCachedRenderPassCount();
@@ -402,11 +427,13 @@ namespace cct::gfx::rhi
 		m_idleExecutionLimit = std::max<UInt32>(executions, 1);
 	}
 
-	RenderGraph::CachedFrameBuffer& RenderGraph::AcquireFrameBuffer(const RGPass& pass, const RenderPass& renderPass, UInt32 frameWidth, UInt32 frameHeight, UInt64 execution)
+	FrameBuffer* RenderGraph::AcquireFrameBuffer(const RGPass& pass, const RenderPass& renderPass, UInt32 frameWidth, UInt32 frameHeight, UInt64 execution)
 	{
 		std::vector<RGTextureHandle> attachmentHandles = pass.colorAttachments;
 		if (pass.depthAttachment.has_value())
+		{
 			attachmentHandles.push_back(*pass.depthAttachment);
+		}
 
 		UInt32 width = frameWidth;
 		UInt32 height = frameHeight;
@@ -422,34 +449,47 @@ namespace cct::gfx::rhi
 
 		const auto matches = [&](const CachedFrameBuffer& cached)
 		{
-			if (cached.renderPass != &renderPass || cached.width != width || cached.height != height || cached.attachments.size() != attachmentHandles.size())
+			if (cached.m_renderPass != &renderPass || cached.m_width != width || cached.m_height != height || cached.m_attachments.size() != attachmentHandles.size())
+			{
 				return false;
-			return std::ranges::equal(cached.attachments, attachmentHandles, [this](const std::shared_ptr<Texture>& texture, RGTextureHandle handle)
-									  { return texture == m_registry.GetTexturePointer(handle); });
+			}
+			return std::ranges::equal(cached.m_attachments, attachmentHandles, [this](const std::weak_ptr<Texture>& texture, RGTextureHandle handle)
+									  {
+										  const std::shared_ptr<Texture> alive = texture.lock();
+										  return alive != nullptr && alive == m_registry.GetTexturePointer(handle); });
 		};
 		const auto found = std::ranges::find_if(m_frameBufferCache, matches);
 		if (found != m_frameBufferCache.end())
 		{
-			found->lastUse = execution;
-			return *found;
+			found->m_lastUse = execution;
+			return found->m_frameBuffer.get();
 		}
 
 		const Clock::time_point start = Clock::now();
 		CachedFrameBuffer entry;
-		entry.renderPass = &renderPass;
-		entry.width = width;
-		entry.height = height;
-		entry.lastUse = execution;
+		entry.m_renderPass = &renderPass;
+		entry.m_width = width;
+		entry.m_height = height;
+		entry.m_lastUse = execution;
 		for (const RGTextureHandle handle : attachmentHandles)
 		{
-			entry.attachments.push_back(m_registry.GetTexturePointer(handle));
-			entry.views.push_back(m_registry.GetTexture(handle).CreateView());
+			const std::shared_ptr<Texture>& texture = m_registry.GetTexturePointer(handle);
+			entry.m_attachments.emplace_back(texture);
+			if (!m_registry.IsImported(handle))
+			{
+				entry.m_ownedAttachments.push_back(texture);
+			}
+			entry.m_views.push_back(texture->CreateView());
 		}
-		entry.frameBuffer = m_device.CreateFrameBuffer(width, height, renderPass, entry.views);
-		++m_statistics.m_frameBuffersCreated;
+		entry.m_frameBuffer = m_device.CreateFrameBuffer(width, height, renderPass, entry.m_views);
 		m_statistics.m_frameBufferCreationTime += Clock::now() - start;
+		if (entry.m_frameBuffer == nullptr)
+		{
+			return nullptr;
+		}
+		++m_statistics.m_frameBuffersCreated;
 		m_frameBufferCache.push_back(std::move(entry));
-		return m_frameBufferCache.back();
+		return m_frameBufferCache.back().m_frameBuffer.get();
 	}
 
 	void RenderGraph::RetireIdleObjects()
@@ -459,36 +499,45 @@ namespace cct::gfx::rhi
 		{ return m_lastExecution >= lastUse + limit; };
 		std::erase_if(m_frameBufferCache, [&](CachedFrameBuffer& cached)
 					  {
-						  if (!isIdle(cached.lastUse))
+						  const bool expired = std::ranges::any_of(cached.m_attachments, [](const std::weak_ptr<Texture>& texture) { return texture.expired(); });
+						  if (!expired && !isIdle(cached.m_lastUse))
+						  {
 							  return false;
-						  m_retired.lastUse = std::max(m_retired.lastUse, cached.lastUse);
-						  m_retired.frameBuffers.push_back(std::move(cached));
+						  }
+						  m_retired.m_lastUse = std::max(m_retired.m_lastUse, cached.m_lastUse);
+						  m_retired.m_frameBuffers.push_back(std::move(cached));
 						  return true; });
-		const std::size_t retiredRenderPasses = m_retired.renderPasses.size();
-		const UInt64 renderPassLastUse = m_compiler.RetireIdleRenderPasses(m_lastExecution, limit, m_compiledPasses, m_retired.renderPasses);
-		if (m_retired.renderPasses.size() != retiredRenderPasses)
-			m_retired.lastUse = std::max(m_retired.lastUse, renderPassLastUse);
+		const std::size_t retiredRenderPasses = m_retired.m_renderPasses.size();
+		const UInt64 renderPassLastUse = m_compiler.RetireIdleRenderPasses(m_lastExecution, limit, m_compiledPasses, m_retired.m_renderPasses);
+		if (m_retired.m_renderPasses.size() != retiredRenderPasses)
+		{
+			m_retired.m_lastUse = std::max(m_retired.m_lastUse, renderPassLastUse);
+		}
 		m_registry.TrimPool(m_lastExecution, limit);
 	}
 
 	void RenderGraph::ReleaseCompletedResources()
 	{
-		if (m_retired.lastUse <= m_completedExecution)
+		if (m_retired.m_lastUse <= m_completedExecution)
+		{
 			ReleaseRetired(m_retired);
+		}
 		std::erase_if(m_pendingFrames, [this](RetiredResources& pending)
 					  {
-						  if (pending.lastUse > m_completedExecution)
+						  if (pending.m_lastUse > m_completedExecution)
+						  {
 							  return false;
+						  }
 						  ReleaseRetired(pending);
 						  return true; });
 	}
 
 	void RenderGraph::ReleaseRetired(RetiredResources& retired)
 	{
-		retired.frameBuffers.clear();
-		m_registry.ReturnTransientsToPool(retired.transientTextures, retired.transientBuffers, retired.lastUse);
-		retired.renderPasses.clear();
-		retired.lastUse = 0;
+		retired.m_frameBuffers.clear();
+		m_registry.ReturnTransientsToPool(retired.m_transientTextures, retired.m_transientBuffers, retired.m_lastUse);
+		retired.m_renderPasses.clear();
+		retired.m_lastUse = 0;
 	}
 
 	void RenderGraph::SetTimestampQueryPool(QueryPool* pool)
@@ -505,13 +554,17 @@ namespace cct::gfx::rhi
 	bool RenderGraph::ResolveTimestamps()
 	{
 		if (m_timestampPool == nullptr || m_timedPassTypes.empty())
+		{
 			return false;
+		}
 		m_timestampTicks.resize(m_timedPassTypes.size() + 1);
 		const bool available = m_timestampPool->ReadTimestamps(0, m_timestampTicks);
 		const std::vector<RGPassType> passTypes = std::move(m_timedPassTypes);
 		m_timedPassTypes.clear();
 		if (!available)
+		{
 			return false;
+		}
 
 		const double period = m_timestampPool->GetTimestampPeriod();
 		const auto toDuration = [period](UInt64 begin, UInt64 end)

@@ -33,12 +33,14 @@ namespace cct::gfx::rhi
 	// completed on the GPU. Each Execute has a serial (GetLastExecution). An owner that waits for its submissions
 	// calls MarkExecutionsComplete after the wait, and what the graph retired since (transients released by Clear,
 	// idle render passes and framebuffers) is released at once, so the next declaration reuses the same transients.
-	// Without it, a retired set is released after maxFramesInFlight further calls to Reset, which assumes the owner
-	// waits for the submission of an execution before the maxFramesInFlight-th next Reset.
+	// Without it, a retired set is released after maxFramesInFlight further calls to Reset. That rule also applies with
+	// completion reports, as an upper bound: an owner must never have more than maxFramesInFlight executions in flight
+	// when it calls Reset.
 	//
 	// Render passes and framebuffers are cached across Clear: a declaration that compiles to the same attachments
 	// reuses them. A cached render pass or framebuffer, or a pooled transient, that no execution used for the idle
-	// execution limit is released through the same completion rule.
+	// execution limit is released through the same completion rule. Only executions age the caches: a graph that is not
+	// executed keeps them.
 	class CONCERTO_GRAPHICS_RHI_BASE_API RenderGraph
 	{
 	public:
@@ -159,28 +161,33 @@ namespace cct::gfx::rhi
 		// before the textures they were created from.
 		struct CachedFrameBuffer
 		{
-			const RenderPass* renderPass = nullptr;
-			UInt32 width = 0;
-			UInt32 height = 0;
-			// Owning, so that an attachment address cannot be reused by another texture while the entry exists.
-			std::vector<std::shared_ptr<Texture>> attachments;
-			std::vector<std::unique_ptr<TextureView>> views;
-			std::unique_ptr<FrameBuffer> frameBuffer;
-			UInt64 lastUse = 0;
+			const RenderPass* m_renderPass = nullptr;
+			UInt32 m_width = 0;
+			UInt32 m_height = 0;
+			// Identifies the attachments: an expired entry never matches, so a destroyed texture whose address is reused
+			// cannot alias it.
+			std::vector<std::weak_ptr<Texture>> m_attachments;
+			// Transient attachments are owned, so that the pool cannot destroy one while the entry exists. Imported ones
+			// (swapchain images) are not, so that their owner can release them, for example to resize a swapchain.
+			std::vector<std::shared_ptr<Texture>> m_ownedAttachments;
+			std::vector<std::unique_ptr<TextureView>> m_views;
+			std::unique_ptr<FrameBuffer> m_frameBuffer;
+			UInt64 m_lastUse = 0;
 		};
 
 		// Resources the GPU may still use, released once execution lastUse has completed. Framebuffers are destroyed
 		// first, render passes last.
 		struct RetiredResources
 		{
-			UInt64 lastUse = 0;
-			std::vector<std::unique_ptr<RenderPass>> renderPasses;
-			std::vector<RenderGraphResourceRegistry::BufferTransientSnapshot> transientBuffers;
-			std::vector<RenderGraphResourceRegistry::TextureTransientSnapshot> transientTextures;
-			std::vector<CachedFrameBuffer> frameBuffers;
+			UInt64 m_lastUse = 0;
+			std::vector<std::unique_ptr<RenderPass>> m_renderPasses;
+			std::vector<RenderGraphResourceRegistry::BufferTransientSnapshot> m_transientBuffers;
+			std::vector<RenderGraphResourceRegistry::TextureTransientSnapshot> m_transientTextures;
+			std::vector<CachedFrameBuffer> m_frameBuffers;
 		};
 
-		CachedFrameBuffer& AcquireFrameBuffer(const RGPass& pass, const RenderPass& renderPass, UInt32 frameWidth, UInt32 frameHeight, UInt64 execution);
+		// nullptr when the device cannot create the framebuffer.
+		FrameBuffer* AcquireFrameBuffer(const RGPass& pass, const RenderPass& renderPass, UInt32 frameWidth, UInt32 frameHeight, UInt64 execution);
 		void RetireIdleObjects();
 		void ReleaseCompletedResources();
 		void ReleaseRetired(RetiredResources& retired);
@@ -200,12 +207,13 @@ namespace cct::gfx::rhi
 		RGTextureHandle m_finalOutput;
 		Vector3f m_clearColor{0.F, 0.F, 0.F};
 		bool m_dirty = true;
-		FrameBuffer* m_currentFrameBuffer = nullptr; // active framebuffer across a merge group
 		RenderGraphStatistics m_statistics;
 		QueryPool* m_timestampPool = nullptr;
 		// The passes timed by the last Execute, in recording order.
 		std::vector<RGPassType> m_timedPassTypes;
 		std::vector<UInt64> m_timestampTicks;
+		// The framebuffer of each compiled pass that opens a render pass, acquired by Execute before it records.
+		std::vector<FrameBuffer*> m_passFrameBuffers;
 	};
 } // namespace cct::gfx::rhi
 

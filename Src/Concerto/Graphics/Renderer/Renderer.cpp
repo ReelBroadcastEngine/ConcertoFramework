@@ -43,6 +43,16 @@ namespace cct::gfx
 		m_graph.Compile();
 	}
 
+	UInt64 Renderer::GetLastExecution() const
+	{
+		return m_graph.GetLastExecution();
+	}
+
+	void Renderer::MarkExecutionsComplete(UInt64 execution)
+	{
+		m_graph.MarkExecutionsComplete(execution);
+	}
+
 	Result<void, rhi::RenderGraphError> Renderer::DrawFrame(rhi::CommandBuffer& cmd, const RenderTarget& target, const View& view)
 	{
 		m_graph.Reset();

@@ -23,7 +23,9 @@ namespace cct::gfx::rhi
 		bool FitsLimits(const RGTextureDesc& desc, const DeviceLimits& limits)
 		{
 			if (desc.width == 0 || desc.height == 0)
+			{
 				return false;
+			}
 			const UInt32 maxWidth = std::min(limits.m_maxTextureDimension2D, limits.m_maxFrameBufferWidth);
 			const UInt32 maxHeight = std::min(limits.m_maxTextureDimension2D, limits.m_maxFrameBufferHeight);
 			return desc.width <= maxWidth && desc.height <= maxHeight;
@@ -32,29 +34,29 @@ namespace cct::gfx::rhi
 
 	std::size_t RenderGraphResourceRegistry::TextureKeyHash::operator()(const TextureKey& key) const
 	{
-		std::size_t seed = std::hash<UInt32>{}(key.width);
-		HashCombine(seed, std::hash<UInt32>{}(key.height));
-		HashCombine(seed, std::hash<UInt8>{}(static_cast<UInt8>(key.format)));
-		HashCombine(seed, std::hash<bool>{}(key.isDepth));
-		HashCombine(seed, std::hash<bool>{}(key.storage));
+		std::size_t seed = std::hash<UInt32>{}(key.m_width);
+		HashCombine(seed, std::hash<UInt32>{}(key.m_height));
+		HashCombine(seed, std::hash<UInt8>{}(static_cast<UInt8>(key.m_format)));
+		HashCombine(seed, std::hash<bool>{}(key.m_isDepth));
+		HashCombine(seed, std::hash<bool>{}(key.m_storage));
 		return seed;
 	}
 
 	std::size_t RenderGraphResourceRegistry::BufferKeyHash::operator()(const BufferKey& key) const
 	{
-		std::size_t seed = std::hash<UInt32>{}(key.size);
-		HashCombine(seed, std::hash<UInt32>{}(key.usage));
+		std::size_t seed = std::hash<UInt32>{}(key.m_size);
+		HashCombine(seed, std::hash<UInt32>{}(key.m_usage));
 		return seed;
 	}
 
 	RenderGraphResourceRegistry::TextureKey RenderGraphResourceRegistry::KeyOf(const RGTextureDesc& desc)
 	{
-		return TextureKey{.width = desc.width, .height = desc.height, .format = desc.format, .isDepth = desc.isDepth, .storage = desc.storage};
+		return TextureKey{.m_width = desc.width, .m_height = desc.height, .m_format = desc.format, .m_isDepth = desc.isDepth, .m_storage = desc.storage};
 	}
 
 	RenderGraphResourceRegistry::BufferKey RenderGraphResourceRegistry::KeyOf(const RGBufferDesc& desc)
 	{
-		return BufferKey{.size = desc.size, .usage = desc.usage.Value()};
+		return BufferKey{.m_size = desc.size, .m_usage = desc.usage.Value()};
 	}
 
 	RGTextureHandle RenderGraphResourceRegistry::RegisterTexture(const RGTextureDesc& desc)
@@ -121,8 +123,8 @@ namespace cct::gfx::rhi
 			auto pool = m_transientTexturePool.find(KeyOf(entry.desc));
 			if (pool != m_transientTexturePool.end() && !pool->second.empty())
 			{
-				entry.physical = std::move(pool->second.back().physical);
-				entry.currentLayout = pool->second.back().lastLayout;
+				entry.physical = std::move(pool->second.back().m_physical);
+				entry.currentLayout = pool->second.back().m_lastLayout;
 				pool->second.pop_back();
 				++statistics.m_texturesReused;
 				continue;
@@ -154,9 +156,9 @@ namespace cct::gfx::rhi
 			auto pool = m_transientBufferPool.find(KeyOf(entry.desc));
 			if (pool != m_transientBufferPool.end() && !pool->second.empty())
 			{
-				entry.physical = std::move(pool->second.back().physical);
-				entry.currentStage = pool->second.back().lastStage;
-				entry.currentAccess = pool->second.back().lastAccess;
+				entry.physical = std::move(pool->second.back().m_physical);
+				entry.currentStage = pool->second.back().m_lastStage;
+				entry.currentAccess = pool->second.back().m_lastAccess;
 				pool->second.pop_back();
 				++statistics.m_buffersReused;
 				continue;
@@ -211,13 +213,17 @@ namespace cct::gfx::rhi
 		{
 			auto& bucket = m_transientTexturePool[KeyOf(snap.desc)];
 			if (bucket.size() < MaxPooledPerDesc)
-				bucket.push_back({std::move(snap.physical), snap.lastLayout, lastUse});
+			{
+				bucket.push_back(PooledTexture{.m_physical = std::move(snap.physical), .m_lastLayout = snap.lastLayout, .m_lastUse = lastUse});
+			}
 		}
 		for (auto& snap : buffers)
 		{
 			auto& bucket = m_transientBufferPool[KeyOf(snap.desc)];
 			if (bucket.size() < MaxPooledPerDesc)
-				bucket.push_back({std::move(snap.physical), snap.lastStage, snap.lastAccess, lastUse});
+			{
+				bucket.push_back(PooledBuffer{.m_physical = std::move(snap.physical), .m_lastStage = snap.lastStage, .m_lastAccess = snap.lastAccess, .m_lastUse = lastUse});
+			}
 		}
 		textures.clear();
 		buffers.clear();
@@ -228,11 +234,15 @@ namespace cct::gfx::rhi
 		const auto idle = [lastExecution, idleExecutions](UInt64 lastUse)
 		{ return lastExecution >= lastUse + idleExecutions; };
 		for (auto& [key, bucket] : m_transientTexturePool)
+		{
 			std::erase_if(bucket, [&](const PooledTexture& pooled)
-						  { return idle(pooled.lastUse); });
+						  { return idle(pooled.m_lastUse); });
+		}
 		for (auto& [key, bucket] : m_transientBufferPool)
+		{
 			std::erase_if(bucket, [&](const PooledBuffer& pooled)
-						  { return idle(pooled.lastUse); });
+						  { return idle(pooled.m_lastUse); });
+		}
 		std::erase_if(m_transientTexturePool, [](const auto& item)
 					  { return item.second.empty(); });
 		std::erase_if(m_transientBufferPool, [](const auto& item)
@@ -310,7 +320,7 @@ namespace cct::gfx::rhi
 	{
 		CCT_ASSERT(handle.index < m_textures.size(),
 				   "RenderGraphResourceRegistry::GetTexturePointer: invalid handle index {}", handle.index);
-		return m_textures[handle.index].physical;
+		return m_textures.at(handle.index).physical;
 	}
 
 	Buffer& RenderGraphResourceRegistry::GetBuffer(RGBufferHandle handle)
@@ -345,7 +355,9 @@ namespace cct::gfx::rhi
 	{
 		std::size_t count = 0;
 		for (const auto& [key, bucket] : m_transientTexturePool)
+		{
 			count += bucket.size();
+		}
 		return count;
 	}
 
@@ -353,7 +365,9 @@ namespace cct::gfx::rhi
 	{
 		std::size_t count = 0;
 		for (const auto& [key, bucket] : m_transientBufferPool)
+		{
 			count += bucket.size();
+		}
 		return count;
 	}
 } // namespace cct::gfx::rhi

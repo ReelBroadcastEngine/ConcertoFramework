@@ -26,6 +26,10 @@ namespace cct::gfx
 
 		// Records the frame into cmd; records nothing and returns the error when the graph cannot allocate its resources.
 		[[nodiscard]] Result<void, rhi::RenderGraphError> DrawFrame(rhi::CommandBuffer& cmd, const RenderTarget& target, const View& view);
+		// Forwarded to the graph: an owner that waits for its frames reports their completion so that the graph reuses
+		// their resources at once (RenderGraph::MarkExecutionsComplete).
+		[[nodiscard]] UInt64 GetLastExecution() const;
+		void MarkExecutionsComplete(UInt64 execution);
 
 		[[nodiscard]] const rhi::RenderPass& GetPassRenderPass(const char* name) const;
 

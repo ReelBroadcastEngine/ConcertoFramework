@@ -65,10 +65,10 @@ namespace cct::gfx::rhi
 	private:
 		struct CachedRenderPass
 		{
-			std::vector<RenderPass::Attachment> attachments;
-			bool hasDepth = false;
-			std::unique_ptr<RenderPass> renderPass;
-			UInt64 lastUse = 0;
+			std::vector<RenderPass::Attachment> m_attachments;
+			bool m_hasDepth = false;
+			std::unique_ptr<RenderPass> m_renderPass;
+			UInt64 m_lastUse = 0;
 		};
 
 		RenderPass* AcquireRenderPass(std::vector<RenderPass::Attachment>&& attachments, bool hasDepth, Device& device, RenderGraphStatistics& statistics);
@@ -81,9 +81,7 @@ namespace cct::gfx::rhi
 		void BuildDependencies(std::vector<RGPass>& passes);
 		void CullPasses(std::vector<RGPass>& passes, RGTextureHandle finalOutput);
 		std::vector<UInt32> TopologicalSort(const std::vector<RGPass>& passes);
-		void BuildRenderPassObjects(RGCompiledPass& compiled, RGPass& pass,
-									UInt32 passIdx, const std::unordered_set<UInt16>& alreadyWritten,
-									const RenderGraphResourceRegistry& registry, Device& device, RenderGraphStatistics& statistics);
+		static std::vector<RenderPass::Attachment> DescribeAttachments(const RGPass& pass, const std::unordered_set<UInt16>& alreadyWritten, const RenderGraphResourceRegistry& registry);
 
 		std::unordered_map<UInt16, UInt32> m_textureLastWriter; // texIdx → last writer passIdx
 		std::unordered_map<UInt16, UInt32> m_bufferLastWriter;

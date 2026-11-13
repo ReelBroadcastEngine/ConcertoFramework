@@ -141,11 +141,11 @@ namespace cct::gfx::rhi
 		// What makes two transients interchangeable; the name is not part of it.
 		struct TextureKey
 		{
-			UInt32 width = 0;
-			UInt32 height = 0;
-			PixelFormat format = PixelFormat::RGBA8_SRGB;
-			bool isDepth = false;
-			bool storage = false;
+			UInt32 m_width = 0;
+			UInt32 m_height = 0;
+			PixelFormat m_format = PixelFormat::RGBA8_SRGB;
+			bool m_isDepth = false;
+			bool m_storage = false;
 			bool operator==(const TextureKey&) const = default;
 		};
 		struct TextureKeyHash
@@ -154,8 +154,8 @@ namespace cct::gfx::rhi
 		};
 		struct BufferKey
 		{
-			UInt32 size = 0;
-			UInt32 usage = 0;
+			UInt32 m_size = 0;
+			UInt32 m_usage = 0;
 			bool operator==(const BufferKey&) const = default;
 		};
 		struct BufferKeyHash
@@ -165,16 +165,16 @@ namespace cct::gfx::rhi
 
 		struct PooledTexture
 		{
-			std::shared_ptr<Texture> physical;
-			ImageLayout lastLayout = ImageLayout::Undefined;
-			UInt64 lastUse = 0;
+			std::shared_ptr<Texture> m_physical;
+			ImageLayout m_lastLayout = ImageLayout::Undefined;
+			UInt64 m_lastUse = 0;
 		};
 		struct PooledBuffer
 		{
-			std::shared_ptr<Buffer> physical;
-			PipelineStageFlags lastStage;
-			MemoryAccessFlags lastAccess;
-			UInt64 lastUse = 0;
+			std::shared_ptr<Buffer> m_physical;
+			PipelineStageFlags m_lastStage;
+			MemoryAccessFlags m_lastAccess;
+			UInt64 m_lastUse = 0;
 		};
 
 		static TextureKey KeyOf(const RGTextureDesc& desc);
