@@ -59,9 +59,9 @@ namespace cct::gfx::rhi
 		virtual void Copy(const Texture& src, const Buffer& dst, UInt64 dstOffset = 0) = 0;
 		// Copies a sub-rectangle from a buffer into a texture in TransferDstOptimal layout.
 		virtual void Copy(const Buffer& src, const Texture& dst, const BufferTextureCopyRegion& region) = 0;
-		// Copies every texel of src, in TransferSrcOptimal layout, into dst, in TransferDstOptimal layout, without format
-		// conversion. Both textures must have the same size and format; otherwise nothing is recorded and debug builds
-		// assert.
+		// Copies between distinct single-sampled 2D color textures of the same size and format, without conversion.
+		// The textures must belong to this device and support transfer. The layouts are TransferSrcOptimal for src and
+		// TransferDstOptimal for dst. Incompatible textures throw std::invalid_argument before recording the copy.
 		virtual void Copy(const Texture& src, const Texture& dst) = 0;
 		// Resets the queries [first, first + count) of pool, which must have been created by this command buffer's device.
 		// Outside a render pass.

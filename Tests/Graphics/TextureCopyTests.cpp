@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <memory>
 #include <span>
+#include <stdexcept>
 
 #include <Concerto/Graphics/RenderGraph/RenderGraph.hpp>
 #include <Concerto/Graphics/RHI/Buffer.hpp>
@@ -127,6 +128,17 @@ namespace
 		{
 			SKIP("No device for this backend");
 		}
+		const auto source = context.GetDevice()->CreateTexture(cct::gfx::PixelFormat::RGBA8uNorm, 4, 4);
+		const auto differentSize = context.GetDevice()->CreateTexture(cct::gfx::PixelFormat::RGBA8uNorm, 2, 4);
+		const auto differentFormat = context.GetDevice()->CreateTexture(cct::gfx::PixelFormat::RGBA8_SRGB, 4, 4);
+		REQUIRE(source != nullptr);
+		REQUIRE(differentSize != nullptr);
+		REQUIRE(differentFormat != nullptr);
+		context.SubmitAndWait([&](rhi::CommandBuffer& commands)
+							  {
+								  CHECK_THROWS_AS(commands.Copy(*source, *source), std::invalid_argument);
+								  CHECK_THROWS_AS(commands.Copy(*source, *differentSize), std::invalid_argument);
+								  CHECK_THROWS_AS(commands.Copy(*source, *differentFormat), std::invalid_argument); });
 		for (const cct::gfx::PixelFormat format : {cct::gfx::PixelFormat::RGBA8uNorm, cct::gfx::PixelFormat::RGBA8_SRGB})
 		{
 			for (const Extent extent : Extents)

@@ -5,6 +5,7 @@
 #include "Concerto/Graphics/RHI/Vulkan/VkRHICommandBuffer/VkRHICommandBuffer.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 
 #include <Concerto/Core/Cast.hpp>
 
@@ -285,10 +286,13 @@ namespace cct::gfx::rhi
 		const auto& vkDestination = Cast<const VkRHITexture&>(dst);
 		const VkExtent2D extent = vkSource.GetImage().GetExtent();
 		const VkExtent2D destinationExtent = vkDestination.GetImage().GetExtent();
-		if (extent.width != destinationExtent.width || extent.height != destinationExtent.height || vkSource.GetImage().GetFormat() != vkDestination.GetImage().GetFormat())
+		const VkFormat format = vkSource.GetImage().GetFormat();
+		if (*vkSource.GetImage().Get() == *vkDestination.GetImage().Get() ||
+			extent.width != destinationExtent.width || extent.height != destinationExtent.height ||
+			format != vkDestination.GetImage().GetFormat() ||
+			(format >= VK_FORMAT_D16_UNORM && format <= VK_FORMAT_D32_SFLOAT_S8_UINT))
 		{
-			CCT_ASSERT_FALSE("ConcertoGraphics: texture copy between textures of different sizes or formats");
-			return;
+			throw std::invalid_argument("ConcertoGraphics: a texture copy requires distinct color textures of the same size and format");
 		}
 
 		VkImageCopy region = {};
