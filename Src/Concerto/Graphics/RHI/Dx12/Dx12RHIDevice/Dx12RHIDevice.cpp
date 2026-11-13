@@ -294,7 +294,10 @@ namespace cct::gfx::rhi
 
 	std::unique_ptr<Buffer> Dx12RHIDevice::CreateBuffer(rhi::BufferUsageFlags usage, UInt32 allocationSize, bool allowBufferMapping)
 	{
-		return std::make_unique<Dx12RHIBuffer>(*this, usage, allocationSize, allowBufferMapping);
+		auto buffer = std::make_unique<Dx12RHIBuffer>(*this, usage, allocationSize, allowBufferMapping);
+		if (buffer->GetResource() == nullptr)
+			return nullptr;
+		return buffer;
 	}
 
 	std::size_t Dx12RHIDevice::GetMinimumUniformBufferOffsetAlignment() const

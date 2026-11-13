@@ -22,9 +22,15 @@ namespace cct::gfx::rhi
 	public:
 		virtual ~Buffer() = default;
 
+		// Mappable buffers (Device::CreateBuffer with allowBufferMapping) are for one transfer direction, set by their usage:
+		// with BufferUsage::HostReadback the device writes and the host reads, otherwise the host writes and the device
+		// reads. Map makes completed device writes visible to the host (after RecordReadback), UnMap makes host writes
+		// visible to work submitted afterwards. Returns false when the buffer cannot be mapped.
 		virtual bool Map(Byte** data) = 0;
 		virtual void UnMap() = 0;
 		[[nodiscard]] virtual BufferMemoryProperties GetMemoryProperties() const = 0;
+		// Records, after the last device write of a HostReadback buffer in cmd, what the host needs to read those writes once
+		// the submission completed: a device-to-host barrier, or a copy into host-readable memory.
 		virtual void RecordReadback(CommandBuffer& /*cmd*/)
 		{
 		}

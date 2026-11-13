@@ -23,11 +23,20 @@ namespace cct::gfx::rhi
 
 		const bool isStorage = usage.Contains(BufferUsage::Storage);
 		const bool needsHostReadback = usage.Contains(BufferUsage::HostReadback);
-		const bool needsReadbackShadow = allowMapping && needsHostReadback;
+		// A readback heap resource can only be a copy destination, so a storage buffer read by the host is written in a
+		// default heap and copied into a readback shadow by RecordReadback.
+		const bool directReadback = allowMapping && needsHostReadback && !isStorage;
+		const bool needsReadbackShadow = allowMapping && needsHostReadback && isStorage;
 		const bool wantsUav = isStorage && (!allowMapping || needsHostReadback);
 
 		D3D12_HEAP_PROPERTIES heapProperties = {};
-		heapProperties.Type = (allowMapping && !needsReadbackShadow) ? D3D12_HEAP_TYPE_UPLOAD : D3D12_HEAP_TYPE_DEFAULT;
+		if (directReadback)
+			heapProperties.Type = D3D12_HEAP_TYPE_READBACK;
+		else if (allowMapping && !needsReadbackShadow)
+			heapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
+		else
+			heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+		m_hostReadback = allowMapping && needsHostReadback;
 		heapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
 		heapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
 
@@ -46,9 +55,11 @@ namespace cct::gfx::rhi
 								 ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
 								 : D3D12_RESOURCE_FLAG_NONE;
 
-		const D3D12_RESOURCE_STATES initialState = (heapProperties.Type == D3D12_HEAP_TYPE_UPLOAD)
-													   ? D3D12_RESOURCE_STATE_GENERIC_READ
-													   : D3D12_RESOURCE_STATE_COMMON;
+		D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON;
+		if (heapProperties.Type == D3D12_HEAP_TYPE_UPLOAD)
+			initialState = D3D12_RESOURCE_STATE_GENERIC_READ;
+		else if (heapProperties.Type == D3D12_HEAP_TYPE_READBACK)
+			initialState = D3D12_RESOURCE_STATE_COPY_DEST;
 		m_currentState = initialState;
 
 		HRESULT hr = device.Get()->CreateCommittedResource(
@@ -59,7 +70,11 @@ namespace cct::gfx::rhi
 			nullptr,
 			IID_PPV_ARGS(&m_resource));
 
-		CCT_ASSERT(SUCCEEDED(hr), "ConcertoGraphics: Failed to create DX12 buffer resource HRESULT={}", hr);
+		if (FAILED(hr))
+		{
+			CCT_RHI_LOG_WARN("Dx12RHIBuffer: buffer of {} bytes not created (HRESULT {:#x})", allocSize, static_cast<unsigned>(hr));
+			m_resource.Reset();
+		}
 
 		if (SUCCEEDED(hr))
 			m_gpuAddress = m_resource->GetGPUVirtualAddress();
@@ -82,7 +97,11 @@ namespace cct::gfx::rhi
 				nullptr,
 				IID_PPV_ARGS(&m_readbackResource));
 
-			CCT_ASSERT(SUCCEEDED(readbackHr), "ConcertoGraphics: Failed to create DX12 buffer readback shadow HRESULT={}", readbackHr);
+			if (FAILED(readbackHr))
+			{
+				CCT_RHI_LOG_WARN("Dx12RHIBuffer: readback shadow of {} bytes not created (HRESULT {:#x})", allocSize, static_cast<unsigned>(readbackHr));
+				m_resource.Reset();
+			}
 		}
 	}
 
@@ -127,7 +146,7 @@ namespace cct::gfx::rhi
 			return false;
 
 		auto* target = m_readbackResource ? m_readbackResource.Get() : m_resource.Get();
-		const D3D12_RANGE readRange = m_readbackResource ? D3D12_RANGE{0, m_size} : D3D12_RANGE{0, 0};
+		const D3D12_RANGE readRange = m_hostReadback ? D3D12_RANGE{0, m_size} : D3D12_RANGE{0, 0};
 		return SUCCEEDED(target->Map(0, &readRange, reinterpret_cast<void**>(data)));
 	}
 
@@ -155,6 +174,7 @@ namespace cct::gfx::rhi
 			return;
 
 		auto* target = m_readbackResource ? m_readbackResource.Get() : m_resource.Get();
-		target->Unmap(0, nullptr);
+		const D3D12_RANGE nothingWritten{0, 0};
+		target->Unmap(0, m_hostReadback ? &nothingWritten : nullptr);
 	}
 } // namespace cct::gfx::rhi
