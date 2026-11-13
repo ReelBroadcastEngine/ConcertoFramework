@@ -51,6 +51,7 @@ namespace cct::gfx::rhi
 		void ResetQueries(QueryPool& pool, UInt32 first, UInt32 count) override;
 		void WriteTimestamp(QueryPool& pool, UInt32 index) override;
 		void Copy(const Buffer& src, const Texture& dst, const BufferTextureCopyRegion& region) override;
+		void Copy(const Texture& src, const Texture& dst) override;
 		void TransitionImageLayout(const Texture& texture, ImageLayout oldLayout, ImageLayout newLayout) override;
 		void ExecuteCommands(std::span<CommandBuffer*> secondaryCmdBufs) override;
 		void PipelineBarrier(const Texture& texture,

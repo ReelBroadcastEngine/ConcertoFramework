@@ -279,6 +279,30 @@ namespace cct::gfx::rhi
 			1, &copyRegion);
 	}
 
+	void VkRHICommandBuffer::Copy(const Texture& src, const Texture& dst)
+	{
+		const auto& vkSource = Cast<const VkRHITexture&>(src);
+		const auto& vkDestination = Cast<const VkRHITexture&>(dst);
+		const VkExtent2D extent = vkSource.GetImage().GetExtent();
+		const VkExtent2D destinationExtent = vkDestination.GetImage().GetExtent();
+		if (extent.width != destinationExtent.width || extent.height != destinationExtent.height || vkSource.GetImage().GetFormat() != vkDestination.GetImage().GetFormat())
+		{
+			CCT_ASSERT_FALSE("ConcertoGraphics: texture copy between textures of different sizes or formats");
+			return;
+		}
+
+		VkImageCopy region = {};
+		region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		region.srcSubresource.mipLevel = 0;
+		region.srcSubresource.baseArrayLayer = 0;
+		region.srcSubresource.layerCount = 1;
+		region.dstSubresource = region.srcSubresource;
+		region.extent = {.width = extent.width, .height = extent.height, .depth = 1};
+
+		m_device->vkCmdCopyImage(*vk::CommandBuffer::Get(), *vkSource.GetImage().Get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, *vkDestination.GetImage().Get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+								 &region);
+	}
+
 	void VkRHICommandBuffer::TransitionImageLayout(const Texture& texture, ImageLayout oldLayout, ImageLayout newLayout)
 	{
 		const auto& vkTexture = Cast<const VkRHITexture&>(texture);

@@ -30,6 +30,7 @@ namespace cct::gfx::rhi
 		void Copy(const Buffer& src, const Texture& dst) override;
 		void Copy(const Texture& src, const Buffer& dst, UInt64 dstOffset = 0) override;
 		void Copy(const Buffer& src, const Texture& dst, const BufferTextureCopyRegion& region) override;
+		void Copy(const Texture& src, const Texture& dst) override;
 		void ResetQueries(QueryPool& pool, UInt32 first, UInt32 count) override;
 		void WriteTimestamp(QueryPool& pool, UInt32 index) override;
 		void TransitionImageLayout(const Texture& texture, ImageLayout oldLayout, ImageLayout newLayout) override;

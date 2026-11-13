@@ -476,6 +476,34 @@ namespace cct::gfx::rhi
 		Get()->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
 	}
 
+	void Dx12RHICommandBuffer::Copy(const Texture& src, const Texture& dst)
+	{
+		if (!IsValid())
+			return;
+
+		const auto& dx12Source = Cast<const Dx12RHITexture&>(src);
+		const auto& dx12Destination = Cast<const Dx12RHITexture&>(dst);
+		const D3D12_RESOURCE_DESC sourceDesc = dx12Source.GetResource()->GetDesc();
+		const D3D12_RESOURCE_DESC destinationDesc = dx12Destination.GetResource()->GetDesc();
+		if (sourceDesc.Width != destinationDesc.Width || sourceDesc.Height != destinationDesc.Height || sourceDesc.Format != destinationDesc.Format)
+		{
+			CCT_ASSERT_FALSE("ConcertoGraphics: texture copy between textures of different sizes or formats");
+			return;
+		}
+
+		D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+		srcLoc.pResource = dx12Source.GetResource();
+		srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		srcLoc.SubresourceIndex = 0;
+
+		D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+		dstLoc.pResource = dx12Destination.GetResource();
+		dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		dstLoc.SubresourceIndex = 0;
+
+		Get()->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+	}
+
 	void Dx12RHICommandBuffer::TransitionImageLayout(const Texture& texture, ImageLayout /*oldLayout*/, ImageLayout newLayout)
 	{
 		if (!IsValid())
