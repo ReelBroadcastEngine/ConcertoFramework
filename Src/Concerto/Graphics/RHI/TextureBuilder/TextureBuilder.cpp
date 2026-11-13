@@ -6,7 +6,9 @@
 #include "Concerto/Graphics/RHI/TextureBuilder/TextureBuilder.hpp"
 
 #include <cstring>
+#include <exception>
 #include <stb_image.h>
+#include <stdexcept>
 
 #include <Concerto/Core/DeferredExit/DeferredExit.hpp>
 
@@ -152,10 +154,33 @@ namespace cct::gfx::rhi
 
 		cmdBuf->End();
 
-		auto fence = m_device.CreateFence();
-		m_device.GetQueue(QueueFamily::Graphics).Submit(*cmdBuf, fence.get());
-		fence->Wait();
-
 		m_pendingUploads.clear();
+
+		auto fence = m_device.CreateFence();
+		if (fence == nullptr)
+		{
+			throw std::runtime_error("TextureBuilder: the upload fence could not be created");
+		}
+		Result<void, QueueError> completed = m_device.GetQueue(QueueFamily::Graphics).Submit(*cmdBuf, fence.get());
+		if (completed.IsOk())
+		{
+			completed = fence->Wait();
+		}
+		if (completed.IsError())
+		{
+			// Unless the submission was refused, the GPU may still read the staging buffers released by the throw.
+			if (completed.GetError() != QueueError::NotSubmitted && completed.GetError() != QueueError::DeviceLost)
+			{
+				try
+				{
+					m_device.WaitIdle();
+				}
+				catch (...)
+				{
+					std::terminate();
+				}
+			}
+			throw std::runtime_error("TextureBuilder: the texture uploads could not be confirmed complete");
+		}
 	}
 } // namespace cct::gfx::rhi

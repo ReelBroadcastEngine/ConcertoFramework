@@ -7,6 +7,10 @@
 #include <Concerto/Graphics/RHI/CommandBuffer.hpp>
 #include <Concerto/Graphics/RHI/Device.hpp>
 #include <Concerto/Graphics/RHI/Texture.hpp>
+#ifdef CCT_PLATFORM_WINDOWS
+#include <Concerto/Core/Cast.hpp>
+#include <Concerto/Graphics/RHI/Dx12/Dx12RHIBuffer/Dx12RHIBuffer.hpp>
+#endif
 
 #include "GraphicsTestDevice/GraphicsTestDevice.hpp"
 #include <catch2/catch_test_macros.hpp>
@@ -32,7 +36,12 @@ namespace
 	constexpr std::array Extents{Extent{.m_width = 1, .m_height = 1}, Extent{.m_width = 3, .m_height = 5}, Extent{.m_width = 641, .m_height = 361}, Extent{.m_width = 1920, .m_height = 1080},
 								 Extent{.m_width = 1080, .m_height = 1920}};
 
-	void CheckRoundTrip(const cct::tests::GraphicsTestDevice& context, Extent extent)
+	rhi::BufferUsageFlags CopyDestinationReadback()
+	{
+		return static_cast<rhi::BufferUsageFlags>(rhi::BufferUsage::TransferDst) | rhi::BufferUsage::HostReadback;
+	}
+
+	void CheckRoundTrip(const cct::tests::GraphicsTestDevice& context, Extent extent, rhi::BufferUsageFlags readbackUsage)
 	{
 		rhi::Device& device = *context.GetDevice();
 		const cct::UInt32 rowPitch = device.GetTextureCopyRowPitch(extent.m_width, BytesPerTexel);
@@ -42,8 +51,7 @@ namespace
 
 		const std::shared_ptr<rhi::Texture> texture = device.CreateTexture(cct::gfx::PixelFormat::RGBA8uNorm, static_cast<cct::Int32>(extent.m_width), static_cast<cct::Int32>(extent.m_height));
 		const std::unique_ptr<rhi::Buffer> upload = device.CreateBuffer(static_cast<rhi::BufferUsageFlags>(rhi::BufferUsage::TransferSrc), static_cast<cct::UInt32>(bufferBytes), true);
-		const std::unique_ptr<rhi::Buffer> readback =
-			device.CreateBuffer(static_cast<rhi::BufferUsageFlags>(rhi::BufferUsage::TransferDst) | rhi::BufferUsage::HostReadback, static_cast<cct::UInt32>(bufferBytes), true);
+		const std::unique_ptr<rhi::Buffer> readback = device.CreateBuffer(readbackUsage, static_cast<cct::UInt32>(bufferBytes), true);
 		REQUIRE(texture != nullptr);
 		REQUIRE(upload != nullptr);
 		REQUIRE(readback != nullptr);
@@ -101,7 +109,12 @@ namespace
 		for (const Extent extent : Extents)
 		{
 			INFO("extent " << extent.m_width << "x" << extent.m_height);
-			CheckRoundTrip(context, extent);
+			CheckRoundTrip(context, extent, CopyDestinationReadback());
+		}
+		for (const rhi::BufferUsage otherUse : {rhi::BufferUsage::TransferSrc, rhi::BufferUsage::Storage})
+		{
+			INFO("readback buffer also used as " << static_cast<cct::UInt32>(otherUse));
+			CheckRoundTrip(context, Extent{.m_width = 641, .m_height = 361}, CopyDestinationReadback() | otherUse);
 		}
 		INFO("first error: " << context.GetFirstError());
 		CHECK(context.GetErrorCount() == 0);
@@ -117,6 +130,34 @@ TEST_CASE("Vulkan: a texture read back through a HostReadback buffer holds what 
 TEST_CASE("Direct3D 12: a texture read back through a HostReadback buffer holds what a host-written buffer uploaded", "[graphics][gpu][dx12]")
 {
 	CheckBackend(rhi::Instance::Backend::DirectX12);
+}
+
+TEST_CASE("Direct3D 12: only a buffer used as nothing but a copy destination is created in the readback heap", "[graphics][gpu][dx12]")
+{
+	const cct::tests::GraphicsTestDevice context(rhi::Instance::Backend::DirectX12);
+	if (context.GetDevice() == nullptr)
+	{
+		SKIP("No Direct3D 12 device");
+	}
+	rhi::Device& device = *context.GetDevice();
+	const auto heapType = [&](rhi::BufferUsageFlags usage)
+	{
+		const std::unique_ptr<rhi::Buffer> buffer = device.CreateBuffer(usage, 4096, true);
+		REQUIRE(buffer != nullptr);
+		D3D12_HEAP_PROPERTIES heap{.Type = D3D12_HEAP_TYPE_DEFAULT};
+		REQUIRE(SUCCEEDED(cct::Cast<rhi::Dx12RHIBuffer&>(*buffer).GetResource()->GetHeapProperties(&heap, nullptr)));
+		return heap.Type;
+	};
+
+	CHECK(heapType(CopyDestinationReadback()) == D3D12_HEAP_TYPE_READBACK);
+	for (const rhi::BufferUsage otherUse : {rhi::BufferUsage::TransferSrc, rhi::BufferUsage::Uniform, rhi::BufferUsage::Vertex, rhi::BufferUsage::Index,
+											rhi::BufferUsage::Indirect, rhi::BufferUsage::Storage})
+	{
+		INFO("readback buffer also used as " << static_cast<cct::UInt32>(otherUse));
+		CHECK(heapType(CopyDestinationReadback() | otherUse) == D3D12_HEAP_TYPE_DEFAULT);
+	}
+	INFO("first error: " << context.GetFirstError());
+	CHECK(context.GetErrorCount() == 0);
 }
 #endif
 

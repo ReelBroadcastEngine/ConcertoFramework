@@ -24,12 +24,13 @@ namespace cct::gfx::dx12
 
 		HRESULT Create(Device& device, D3D12_FENCE_FLAGS flags = D3D12_FENCE_FLAG_NONE);
 
-		void Signal(ID3D12CommandQueue& queue) const;
-		void Wait() const;
-		UInt64 GetCompletedValue() const;
+		// The value to wait for advances only when the signal was enqueued.
+		[[nodiscard]] HRESULT Signal(ID3D12CommandQueue& queue) const;
+		// Waits for the last successfully signalled value and rejects the device-removal sentinel.
+		[[nodiscard]] HRESULT Wait() const;
+		[[nodiscard]] UInt64 GetCompletedValue() const;
 
 	private:
-		HANDLE m_completionEvent = nullptr;
 		mutable UInt64 m_nextSignalValue = 1;
 		mutable UInt64 m_lastSignaledValue = 0;
 	};

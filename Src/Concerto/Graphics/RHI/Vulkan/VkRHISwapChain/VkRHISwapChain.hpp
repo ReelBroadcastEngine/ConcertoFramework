@@ -55,11 +55,10 @@ namespace cct::gfx::rhi
 			rhi::CommandBuffer& GetCommandBuffer() override;
 			std::size_t GetCurrentFrameIndex() override;
 			void SetNextImageIndex(UInt32 imageIndex);
-			void Wait() const;
+			void Wait();
 
 			const vk::Semaphore& GetPresentSemaphore() const;
 			const vk::Semaphore& GetRenderSemaphore() const;
-			const vk::Fence& GetRenderFence() const;
 
 			static constexpr UInt32 InvalidFrameIndex = std::numeric_limits<UInt32>::max();
 
@@ -70,6 +69,7 @@ namespace cct::gfx::rhi
 			vk::Semaphore m_renderSemaphore;
 			VkRHISwapChain* m_owner = nullptr;
 			UInt32 m_imageIndex = 0;
+			bool m_submissionPending = false;
 		};
 
 		PixelFormat m_pixelFormat;

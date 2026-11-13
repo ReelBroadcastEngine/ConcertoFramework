@@ -40,7 +40,7 @@ namespace cct::gfx::vk
 
 		[[nodiscard]] UInt32 GetFamilyIndex() const;
 
-		void Submit(const CommandBuffer& commandBuffer, const Semaphore* presentSemaphore, const Semaphore* renderSemaphore, const Fence& renderFence) const;
+		[[nodiscard]] VkResult Submit(const CommandBuffer& commandBuffer, const Semaphore* presentSemaphore, const Semaphore* renderSemaphore, const Fence& renderFence) const;
 		bool Present(const Semaphore& renderSemaphore, SwapChain& swapchain, UInt32 swapchainImageIndex) const;
 		void WaitIdle() const;
 

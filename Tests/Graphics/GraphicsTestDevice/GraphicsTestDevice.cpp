@@ -1,6 +1,7 @@
 #include "GraphicsTestDevice/GraphicsTestDevice.hpp"
 
 #include <exception>
+#include <stdexcept>
 #include <string_view>
 
 #include <Concerto/Graphics/RHI/CommandBuffer.hpp>
@@ -76,7 +77,18 @@ namespace cct::tests
 		commands->Begin();
 		record(*commands);
 		commands->End();
-		m_device->GetQueue(gfx::rhi::QueueFamily::Graphics).Submit(*commands, fence.get());
-		fence->Wait();
+		Result<void, gfx::rhi::QueueError> completed = m_device->GetQueue(gfx::rhi::QueueFamily::Graphics).Submit(*commands, fence.get());
+		if (completed.IsOk())
+		{
+			completed = fence->Wait();
+		}
+		if (completed.IsError())
+		{
+			if (completed.GetError() != gfx::rhi::QueueError::NotSubmitted)
+			{
+				m_device->WaitIdle();
+			}
+			throw std::runtime_error("GraphicsTestDevice: the submission did not complete");
+		}
 	}
 } // namespace cct::tests

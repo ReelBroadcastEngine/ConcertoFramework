@@ -109,6 +109,8 @@ namespace cct::gfx::rhi
 		virtual std::unique_ptr<DescriptorSet> CreateDescriptorSet(const DescriptorSetLayout& layout) = 0;
 		virtual std::size_t GetMinimumUniformBufferOffsetAlignment() const = 0;
 		virtual std::shared_ptr<Texture> CreateTexture(PixelFormat format, Int32 width, Int32 height) = 0;
+		// Returns once the device is idle or confirmed lost, so outstanding resources may be destroyed.
+		// Throws when neither state can be confirmed.
 		virtual void WaitIdle() = 0;
 		[[nodiscard]] virtual DeviceLimits GetLimits() const = 0;
 		virtual std::unique_ptr<GpuMesh> CreateMesh(const std::string& meshPath, rhi::MaterialBuilder& materialBuilder, rhi::TextureBuilder& textureBuilder, const RenderPass& renderPass) = 0;

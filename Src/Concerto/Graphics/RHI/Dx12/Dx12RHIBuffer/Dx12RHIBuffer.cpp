@@ -23,10 +23,12 @@ namespace cct::gfx::rhi
 
 		const bool isStorage = usage.Contains(BufferUsage::Storage);
 		const bool needsHostReadback = usage.Contains(BufferUsage::HostReadback);
-		// A readback heap resource can only be a copy destination, so a storage buffer read by the host is written in a
-		// default heap and copied into a readback shadow by RecordReadback.
-		const bool directReadback = allowMapping && needsHostReadback && !isStorage;
-		const bool needsReadbackShadow = allowMapping && needsHostReadback && isStorage;
+		BufferUsageFlags copyDestinationUsage = BufferUsage::TransferDst;
+		copyDestinationUsage |= BufferUsage::HostReadback;
+		// A readback heap resource can only be a copy destination, so a buffer read by the host that the GPU also uses
+		// otherwise is written in a default heap and copied into a readback shadow by RecordReadback.
+		const bool directReadback = allowMapping && needsHostReadback && (usage & ~copyDestinationUsage).None();
+		const bool needsReadbackShadow = allowMapping && needsHostReadback && !directReadback;
 		const bool wantsUav = isStorage && (!allowMapping || needsHostReadback);
 
 		D3D12_HEAP_PROPERTIES heapProperties = {};

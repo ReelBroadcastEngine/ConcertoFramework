@@ -18,7 +18,7 @@ namespace cct::gfx::rhi
 		VkRHIQueue(vk::Queue& queue, VkRHIDevice& device);
 		~VkRHIQueue() override = default;
 
-		void Submit(CommandBuffer& cmdBuf, Fence* fence = nullptr) override;
+		[[nodiscard]] Result<void, QueueError> Submit(CommandBuffer& cmdBuf, Fence* fence = nullptr) override;
 
 	private:
 		vk::Queue* m_queue;

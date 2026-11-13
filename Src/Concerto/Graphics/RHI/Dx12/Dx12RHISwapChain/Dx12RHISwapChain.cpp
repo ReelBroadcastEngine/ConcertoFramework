@@ -78,8 +78,7 @@ namespace cct::gfx::rhi
 
 	void Dx12RHISwapChain::WaitAll() const
 	{
-		for (auto& frame : m_frames)
-			frame.GetRenderFence().Wait();
+		m_rhiDevice->WaitIdle();
 	}
 
 	CommandPool& Dx12RHISwapChain::GetCommandPool()
@@ -116,12 +115,14 @@ namespace cct::gfx::rhi
 
 	void Dx12RHISwapChain::SwapChainFrame::Wait() const
 	{
-		m_renderFence.Signal(*m_owner->GetCommandQueue().Get());
-		m_renderFence.Wait();
+		if (const HRESULT signalled = m_renderFence.Signal(*m_owner->GetCommandQueue().Get()); FAILED(signalled))
+		{
+			throw dx12::Dx12Exception(signalled);
+		}
+		if (const HRESULT waited = m_renderFence.Wait(); FAILED(waited))
+		{
+			throw dx12::Dx12Exception(waited);
+		}
 	}
 
-	const dx12::Fence& Dx12RHISwapChain::SwapChainFrame::GetRenderFence() const
-	{
-		return m_renderFence;
-	}
 } // namespace cct::gfx::rhi

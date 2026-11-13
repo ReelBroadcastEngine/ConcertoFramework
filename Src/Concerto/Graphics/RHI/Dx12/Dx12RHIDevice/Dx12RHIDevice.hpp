@@ -11,6 +11,7 @@
 #include <optional>
 
 #include "Concerto/Graphics/Backend/Dx12/Wrapper/Device/Device.hpp"
+#include "Concerto/Graphics/Backend/Dx12/Wrapper/Fence/Fence.hpp"
 #include "Concerto/Graphics/Backend/Dx12/Wrapper/Queue/Queue.hpp"
 #include "Concerto/Graphics/RHI/Device.hpp"
 #include "Concerto/Graphics/RHI/Dx12/Dx12RHIDescriptorPool/Dx12RHIDescriptorPool.hpp"
@@ -91,14 +92,14 @@ namespace cct::gfx::rhi
 		}
 		void ExecuteAndWait(ID3D12GraphicsCommandList* cmdList);
 		void EnsureRenderQueue() override;
+		// S_OK while the device is usable.
+		[[nodiscard]] HRESULT GetRemovedReason() const;
 
 	private:
 		std::optional<Dx12RHIDescriptorPool> m_descriptorPool;
 		std::mutex m_descriptorPoolMutex;
 		ID3D12CommandQueue* m_renderQueue = nullptr;
-		Microsoft::WRL::ComPtr<ID3D12Fence> m_uploadFence;
-		HANDLE m_uploadEvent = nullptr;
-		UInt64 m_uploadFenceValue = 0;
+		std::optional<dx12::Fence> m_idleFence;
 		std::unique_ptr<Dx12RHIQueue> m_graphicsQueue;
 		std::filesystem::path m_shaderModulePath;
 		dx12::Queue m_headlessQueue;

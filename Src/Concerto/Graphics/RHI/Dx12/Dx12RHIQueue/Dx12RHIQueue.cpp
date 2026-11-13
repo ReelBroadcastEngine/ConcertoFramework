@@ -4,10 +4,7 @@
 
 #include "Concerto/Graphics/RHI/Dx12/Dx12RHIQueue/Dx12RHIQueue.hpp"
 
-#include <stdexcept>
-
 #include <Concerto/Core/Cast.hpp>
-#include <Concerto/Core/Logger/LogMacros.hpp>
 
 #include "Concerto/Graphics/RHI/Dx12/Dx12RHICommandBuffer/Dx12RHICommandBuffer.hpp"
 #include "Concerto/Graphics/RHI/Dx12/Dx12RHIDevice/Dx12RHIDevice.hpp"
@@ -17,16 +14,12 @@ namespace cct::gfx::rhi
 {
 	namespace
 	{
-		bool LogIfDeviceRemoved(Dx12RHIDevice& device, const char* where)
+		bool LogIfDeviceRemoved(const Dx12RHIDevice& device, const char* where)
 		{
-			ID3D12Device* d3d = static_cast<dx12::Device&>(device).Get();
-			if (!d3d)
-				return true;
-			const HRESULT reason = d3d->GetDeviceRemovedReason();
+			const HRESULT reason = device.GetRemovedReason();
 			if (SUCCEEDED(reason))
 				return false;
-			CCT_GFX_LOG_ERROR("Dx12RHIQueue", "D3D12 device removed at {} (HRESULT={:#x})", where,
-							  static_cast<unsigned>(reason));
+			CCT_RHI_LOG_ERROR("Dx12RHIQueue: device removed at {} (HRESULT {:#x})", where, static_cast<unsigned>(reason));
 			return true;
 		}
 	} // namespace
@@ -37,15 +30,25 @@ namespace cct::gfx::rhi
 	{
 	}
 
-	void Dx12RHIQueue::Submit(CommandBuffer& cmdBuf, Fence* fence)
+	Result<void, QueueError> Dx12RHIQueue::Submit(CommandBuffer& cmdBuf, Fence* fence)
 	{
 		if (!m_queue)
 		{
-			throw std::runtime_error("Dx12RHIQueue: no command queue to submit to");
+			CCT_RHI_LOG_ERROR("Dx12RHIQueue: no command queue to submit to");
+			return QueueError::NotSubmitted;
+		}
+
+		Dx12RHIFence* dx12RHIFence = fence != nullptr ? &Cast<Dx12RHIFence&>(*fence) : nullptr;
+		if (dx12RHIFence != nullptr && dx12RHIFence->IsSignalPending())
+		{
+			CCT_RHI_LOG_ERROR("Dx12RHIQueue: the fence was submitted again before being reset");
+			return QueueError::NotSubmitted;
 		}
 
 		if (LogIfDeviceRemoved(*m_device, "Submit (before ExecuteCommandLists)"))
-			return;
+		{
+			return QueueError::DeviceLost;
+		}
 
 		const auto& dx12CmdBuf = Cast<const Dx12RHICommandBuffer&>(cmdBuf);
 
@@ -53,14 +56,25 @@ namespace cct::gfx::rhi
 		m_queue->ExecuteCommandLists(1, cmdLists);
 
 		if (LogIfDeviceRemoved(*m_device, "Submit (after ExecuteCommandLists)"))
-			return;
-
-		if (fence)
 		{
-			auto& dx12RHIFence = Cast<Dx12RHIFence&>(*fence);
-			dx12RHIFence.GetFence().Signal(*m_queue);
+			return QueueError::DeviceLost;
 		}
+
+		if (dx12RHIFence != nullptr)
+		{
+			if (const HRESULT signalled = dx12RHIFence->Signal(*m_queue); FAILED(signalled))
+			{
+				if (LogIfDeviceRemoved(*m_device, "Submit (Signal)"))
+				{
+					return QueueError::DeviceLost;
+				}
+				CCT_RHI_LOG_ERROR("Dx12RHIQueue: the fence signal was not enqueued after the command list (HRESULT {:#x})", static_cast<unsigned>(signalled));
+				return QueueError::CompletionUnknown;
+			}
+		}
+		return {};
 	}
+
 	void Dx12RHIQueue::SetNativeQueue(ID3D12CommandQueue* queue)
 	{
 		m_queue = queue;

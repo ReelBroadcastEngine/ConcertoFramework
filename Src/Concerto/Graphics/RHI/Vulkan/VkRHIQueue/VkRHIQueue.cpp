@@ -18,7 +18,7 @@ namespace cct::gfx::rhi
 	{
 	}
 
-	void VkRHIQueue::Submit(CommandBuffer& cmdBuf, Fence* fence)
+	Result<void, QueueError> VkRHIQueue::Submit(CommandBuffer& cmdBuf, Fence* fence)
 	{
 		const auto& vkCmdBuf = Cast<const VkRHICommandBuffer&>(cmdBuf);
 
@@ -28,14 +28,40 @@ namespace cct::gfx::rhi
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &cmdBufHandle;
 
+		VkRHIFence* vkRHIFence = nullptr;
 		VkFence vkFence = VK_NULL_HANDLE;
-		if (fence)
+		if (fence != nullptr)
 		{
-			auto& vkRHIFence = Cast<VkRHIFence&>(*fence);
-			vkFence = *vkRHIFence.GetFence().Get();
+			vkRHIFence = &Cast<VkRHIFence&>(*fence);
+			if (vkRHIFence->IsSignalPending())
+			{
+				CCT_RHI_LOG_ERROR("VkRHIQueue: the fence was submitted again before being reset");
+				return QueueError::NotSubmitted;
+			}
+			vkFence = *vkRHIFence->GetFence().Get();
 		}
 
-		VkResult result = m_device->vkQueueSubmit(*m_queue->Get(), 1, &submitInfo, vkFence);
-		CCT_ASSERT(result == VK_SUCCESS, "ConcertoGraphics: vkQueueSubmit failed VkResult={}", static_cast<int>(result));
+		const VkResult result = m_device->vkQueueSubmit(*m_queue->Get(), 1, &submitInfo, vkFence);
+		switch (result)
+		{
+			case VK_SUCCESS:
+				if (vkRHIFence != nullptr)
+				{
+					vkRHIFence->MarkSignalPending();
+				}
+				return {};
+			// The specification guarantees that a submission failing with an out-of-memory error leaves every resource
+			// and synchronization primitive unaffected; a failure that cannot keep that guarantee is VK_ERROR_DEVICE_LOST.
+			case VK_ERROR_OUT_OF_HOST_MEMORY:
+			case VK_ERROR_OUT_OF_DEVICE_MEMORY:
+				CCT_RHI_LOG_ERROR("VkRHIQueue: vkQueueSubmit failed, nothing was submitted (VkResult {})", static_cast<int>(result));
+				return QueueError::NotSubmitted;
+			case VK_ERROR_DEVICE_LOST:
+				CCT_RHI_LOG_ERROR("VkRHIQueue: device lost at vkQueueSubmit");
+				return QueueError::DeviceLost;
+			default:
+				CCT_RHI_LOG_ERROR("VkRHIQueue: vkQueueSubmit failed (VkResult {})", static_cast<int>(result));
+				return QueueError::CompletionUnknown;
+		}
 	}
 } // namespace cct::gfx::rhi

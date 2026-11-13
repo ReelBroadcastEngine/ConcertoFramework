@@ -260,20 +260,30 @@ namespace cct::gfx::rhi
 
 	void Dx12RHIDevice::WaitIdle()
 	{
-		if (!m_renderQueue)
-			return;
-
-		if (!m_uploadFence)
+		if (m_renderQueue == nullptr || FAILED(GetRemovedReason()))
 		{
-			dx12::Device::Get()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_uploadFence));
-			m_uploadEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-			m_uploadFenceValue = 0;
+			return;
 		}
+		if (!m_idleFence)
+		{
+			m_idleFence.emplace(*this);
+		}
+		HRESULT result = m_idleFence->Signal(*m_renderQueue);
+		if (SUCCEEDED(result))
+		{
+			result = m_idleFence->Wait();
+		}
+		if (FAILED(result) && SUCCEEDED(GetRemovedReason()))
+		{
+			CCT_RHI_LOG_ERROR("Dx12RHIDevice: queue idle could not be confirmed (HRESULT {:#x})", static_cast<unsigned>(result));
+			throw dx12::Dx12Exception(result);
+		}
+	}
 
-		++m_uploadFenceValue;
-		m_renderQueue->Signal(m_uploadFence.Get(), m_uploadFenceValue);
-		m_uploadFence->SetEventOnCompletion(m_uploadFenceValue, m_uploadEvent);
-		WaitForSingleObject(m_uploadEvent, INFINITE);
+	HRESULT Dx12RHIDevice::GetRemovedReason() const
+	{
+		ID3D12Device* device = dx12::Device::Get();
+		return device != nullptr ? device->GetDeviceRemovedReason() : DXGI_ERROR_DEVICE_REMOVED;
 	}
 
 	DeviceLimits Dx12RHIDevice::GetLimits() const
@@ -667,22 +677,18 @@ namespace cct::gfx::rhi
 
 	void Dx12RHIDevice::ExecuteAndWait(ID3D12GraphicsCommandList* cmdList)
 	{
-		CCT_ASSERT(m_renderQueue, "ConcertoGraphics: No render queue registered on device");
-
-		if (!m_uploadFence)
+		EnsureRenderQueue();
+		if (m_renderQueue == nullptr)
 		{
-			dx12::Device::Get()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_uploadFence));
-			m_uploadEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-			m_uploadFenceValue = 0;
+			throw dx12::Dx12Exception(E_FAIL);
 		}
-
 		ID3D12CommandList* cmdLists[] = {cmdList};
 		m_renderQueue->ExecuteCommandLists(1, cmdLists);
-
-		++m_uploadFenceValue;
-		m_renderQueue->Signal(m_uploadFence.Get(), m_uploadFenceValue);
-		m_uploadFence->SetEventOnCompletion(m_uploadFenceValue, m_uploadEvent);
-		WaitForSingleObject(m_uploadEvent, INFINITE);
+		WaitIdle();
+		if (const HRESULT removed = GetRemovedReason(); FAILED(removed))
+		{
+			throw dx12::Dx12Exception(removed);
+		}
 	}
 
 	Queue& Dx12RHIDevice::GetQueue(rhi::QueueFamily family)
