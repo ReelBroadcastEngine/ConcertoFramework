@@ -301,7 +301,6 @@ namespace cct::gfx::rhi
 													 RenderGraphStatistics& statistics)
 	{
 		std::vector<RenderPass::Attachment> attachments;
-		std::vector<AttachmentReference> colorRefs;
 
 		// Color attachments
 		for (const RGTextureHandle handle : pass.colorAttachments)
@@ -322,11 +321,9 @@ namespace cct::gfx::rhi
 				ImageLayout::ColorAttachmentOptimal,
 				ImageLayout::ColorAttachmentOptimal,
 			});
-			colorRefs.push_back({static_cast<UInt32>(colorRefs.size()), ImageLayout::ColorAttachmentOptimal});
 		}
 
 		// Depth attachment
-		std::optional<AttachmentReference> depthRef;
 		if (pass.depthAttachment.has_value())
 		{
 			const RGTextureHandle handle = *pass.depthAttachment;
@@ -337,7 +334,6 @@ namespace cct::gfx::rhi
 												? AttachmentLoadOp::Clear
 												: AttachmentLoadOp::Load;
 
-			const UInt32 depthAttachIdx = static_cast<UInt32>(attachments.size());
 			attachments.push_back({
 				desc.format,
 				loadOp,
@@ -347,8 +343,32 @@ namespace cct::gfx::rhi
 				ImageLayout::DepthStencilAttachmentOptimal,
 				ImageLayout::DepthStencilAttachmentOptimal,
 			});
-			depthRef = {depthAttachIdx, ImageLayout::DepthStencilAttachmentOptimal};
 		}
+
+		compiled.renderPass = AcquireRenderPass(std::move(attachments), pass.depthAttachment.has_value(), device, statistics);
+		(void)passIdx;
+	}
+
+	RenderPass* RenderGraphCompiler::AcquireRenderPass(std::vector<RenderPass::Attachment>&& attachments, bool hasDepth, Device& device, RenderGraphStatistics& statistics)
+	{
+		const auto sameAttachment = [](const RenderPass::Attachment& left, const RenderPass::Attachment& right)
+		{
+			return left.pixelFormat == right.pixelFormat && left.loadOp == right.loadOp && left.stencilLoadOp == right.stencilLoadOp && left.storeOp == right.storeOp &&
+				   left.stencilStoreOp == right.stencilStoreOp && left.initialLayout == right.initialLayout && left.finalLayout == right.finalLayout;
+		};
+		for (CachedRenderPass& cached : m_renderPassCache)
+		{
+			if (cached.hasDepth == hasDepth && std::ranges::equal(cached.attachments, attachments, sameAttachment))
+				return cached.renderPass.get();
+		}
+
+		const auto colorCount = static_cast<UInt32>(hasDepth ? attachments.size() - 1 : attachments.size());
+		std::vector<AttachmentReference> colorRefs;
+		for (UInt32 color = 0; color < colorCount; ++color)
+			colorRefs.push_back({color, ImageLayout::ColorAttachmentOptimal});
+		std::optional<AttachmentReference> depthRef;
+		if (hasDepth)
+			depthRef = AttachmentReference{colorCount, ImageLayout::DepthStencilAttachmentOptimal};
 
 		RenderPass::SubPassDescription subpass;
 		subpass.colorAttachments = colorRefs;
@@ -377,14 +397,46 @@ namespace cct::gfx::rhi
 		std::vector<RenderPass::SubPassDependency> depsVec{deps[0], deps[1]};
 
 		const auto creationStart = std::chrono::steady_clock::now();
-		compiled.renderPass = device.CreateRenderPass(
+		std::unique_ptr<RenderPass> renderPass = device.CreateRenderPass(
 			std::span<RenderPass::Attachment>(attachments),
 			std::span<RenderPass::SubPassDescription>(subpassVec),
 			std::span<RenderPass::SubPassDependency>(depsVec));
 		statistics.m_renderPassCreationTime += std::chrono::steady_clock::now() - creationStart;
 		++statistics.m_renderPassesCreated;
+		RenderPass* created = renderPass.get();
+		m_renderPassCache.push_back(CachedRenderPass{.attachments = std::move(attachments), .hasDepth = hasDepth, .renderPass = std::move(renderPass)});
+		return created;
+	}
 
-		(void)passIdx;
+	void RenderGraphCompiler::MarkRenderPassUsed(const RenderPass* renderPass, UInt64 execution)
+	{
+		for (CachedRenderPass& cached : m_renderPassCache)
+		{
+			if (cached.renderPass.get() == renderPass)
+			{
+				cached.lastUse = execution;
+				return;
+			}
+		}
+	}
+
+	UInt64 RenderGraphCompiler::RetireIdleRenderPasses(UInt64 lastExecution, UInt64 idleExecutions, std::span<const RGCompiledPass> inUse, std::vector<std::unique_ptr<RenderPass>>& retired)
+	{
+		UInt64 lastUse = 0;
+		std::erase_if(m_renderPassCache, [&](CachedRenderPass& cached)
+					  {
+						  const bool referenced = std::ranges::any_of(inUse, [&](const RGCompiledPass& compiled) { return compiled.renderPass == cached.renderPass.get(); });
+						  if (referenced || lastExecution < cached.lastUse + idleExecutions)
+							  return false;
+						  lastUse = std::max(lastUse, cached.lastUse);
+						  retired.push_back(std::move(cached.renderPass));
+						  return true; });
+		return lastUse;
+	}
+
+	std::size_t RenderGraphCompiler::GetCachedRenderPassCount() const
+	{
+		return m_renderPassCache.size();
 	}
 
 	ImageLayout RenderGraphCompiler::RequiredLayout(const RGTextureUsage& usage, RGPassType passType, bool isStorage)

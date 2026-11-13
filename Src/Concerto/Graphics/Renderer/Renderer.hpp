@@ -24,7 +24,8 @@ namespace cct::gfx
 
 		void Build(const RenderTarget& target);
 
-		void DrawFrame(rhi::CommandBuffer& cmd, const RenderTarget& target, const View& view);
+		// Records the frame into cmd; records nothing and returns the error when the graph cannot allocate its resources.
+		[[nodiscard]] Result<void, rhi::RenderGraphError> DrawFrame(rhi::CommandBuffer& cmd, const RenderTarget& target, const View& view);
 
 		[[nodiscard]] const rhi::RenderPass& GetPassRenderPass(const char* name) const;
 

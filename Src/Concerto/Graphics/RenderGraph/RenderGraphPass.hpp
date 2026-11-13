@@ -6,13 +6,11 @@
 #define CONCERTO_GRAPHICS_RHI_RENDERGRAPH_PASS_HPP
 
 #include <functional>
-#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "Concerto/Graphics/RenderGraph/RenderGraphResource.hpp"
-#include "Concerto/Graphics/RHI/FrameBuffer.hpp"
 #include "Concerto/Graphics/RHI/RenderPass.hpp"
 #include "Concerto/Graphics/RHI/Texture.hpp"
 
@@ -50,16 +48,10 @@ namespace cct::gfx::rhi
 	struct RGCompiledPass
 	{
 		UInt32 passIndex;
-		std::unique_ptr<RenderPass> renderPass; // non-null when this pass opens a new render pass
+		// Non-null when this pass opens a new render pass. Owned by the compiler's render pass cache, which keeps it
+		// while a compiled pass refers to it.
+		RenderPass* renderPass = nullptr;
 		bool closesRenderPass = true; // false when the next pass continues the same render pass
-
-		struct CachedFrameBuffer
-		{
-			std::vector<const Texture*> attachmentIdentity;
-			std::vector<std::unique_ptr<TextureView>> attachmentViews;
-			std::unique_ptr<FrameBuffer> frameBuffer;
-		};
-		std::vector<CachedFrameBuffer> frameBufferCache;
 	};
 } // namespace cct::gfx::rhi
 

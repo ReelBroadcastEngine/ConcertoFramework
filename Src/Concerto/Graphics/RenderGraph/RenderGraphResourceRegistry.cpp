@@ -4,12 +4,59 @@
 
 #include "Concerto/Graphics/RenderGraph/RenderGraphResourceRegistry.hpp"
 
+#include <algorithm>
+#include <functional>
+
 #include <Concerto/Core/Assert.hpp>
 
 #include "Concerto/Graphics/RHI/Device.hpp"
 
 namespace cct::gfx::rhi
 {
+	namespace
+	{
+		void HashCombine(std::size_t& seed, std::size_t value)
+		{
+			seed ^= value + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+		}
+
+		bool FitsLimits(const RGTextureDesc& desc, const DeviceLimits& limits)
+		{
+			if (desc.width == 0 || desc.height == 0)
+				return false;
+			const UInt32 maxWidth = std::min(limits.m_maxTextureDimension2D, limits.m_maxFrameBufferWidth);
+			const UInt32 maxHeight = std::min(limits.m_maxTextureDimension2D, limits.m_maxFrameBufferHeight);
+			return desc.width <= maxWidth && desc.height <= maxHeight;
+		}
+	} // namespace
+
+	std::size_t RenderGraphResourceRegistry::TextureKeyHash::operator()(const TextureKey& key) const
+	{
+		std::size_t seed = std::hash<UInt32>{}(key.width);
+		HashCombine(seed, std::hash<UInt32>{}(key.height));
+		HashCombine(seed, std::hash<UInt8>{}(static_cast<UInt8>(key.format)));
+		HashCombine(seed, std::hash<bool>{}(key.isDepth));
+		HashCombine(seed, std::hash<bool>{}(key.storage));
+		return seed;
+	}
+
+	std::size_t RenderGraphResourceRegistry::BufferKeyHash::operator()(const BufferKey& key) const
+	{
+		std::size_t seed = std::hash<UInt32>{}(key.size);
+		HashCombine(seed, std::hash<UInt32>{}(key.usage));
+		return seed;
+	}
+
+	RenderGraphResourceRegistry::TextureKey RenderGraphResourceRegistry::KeyOf(const RGTextureDesc& desc)
+	{
+		return TextureKey{.width = desc.width, .height = desc.height, .format = desc.format, .isDepth = desc.isDepth, .storage = desc.storage};
+	}
+
+	RenderGraphResourceRegistry::BufferKey RenderGraphResourceRegistry::KeyOf(const RGBufferDesc& desc)
+	{
+		return BufferKey{.size = desc.size, .usage = desc.usage.Value()};
+	}
+
 	RGTextureHandle RenderGraphResourceRegistry::RegisterTexture(const RGTextureDesc& desc)
 	{
 		const UInt16 idx = static_cast<UInt16>(m_textures.size());
@@ -63,38 +110,40 @@ namespace cct::gfx::rhi
 		entry.initialLayout = currentLayout;
 	}
 
-	void RenderGraphResourceRegistry::Allocate(Device& device, RenderGraphStatistics& statistics)
+	Result<void, RenderGraphError> RenderGraphResourceRegistry::Allocate(Device& device, RenderGraphStatistics& statistics)
 	{
+		const DeviceLimits limits = device.GetLimits();
 		for (auto& entry : m_textures)
 		{
 			if (entry.imported || entry.physical)
 				continue;
 
-			const size_t hash = HashDesc(entry.desc);
-			auto& pool = m_transientTexturePool[hash];
-			if (!pool.empty())
+			auto pool = m_transientTexturePool.find(KeyOf(entry.desc));
+			if (pool != m_transientTexturePool.end() && !pool->second.empty())
 			{
-				entry.physical = pool.back().first;
-				entry.currentLayout = pool.back().second;
-				pool.pop_back();
+				entry.physical = std::move(pool->second.back().physical);
+				entry.currentLayout = pool->second.back().lastLayout;
+				pool->second.pop_back();
 				++statistics.m_texturesReused;
+				continue;
 			}
-			else
+
+			if (!FitsLimits(entry.desc, limits))
 			{
-				entry.physical = entry.desc.storage
-									 ? device.CreateStorageTexture(
-										   entry.desc.format,
-										   static_cast<Int32>(entry.desc.width),
-										   static_cast<Int32>(entry.desc.height))
-									 : device.CreateTexture(
-										   entry.desc.format,
-										   static_cast<Int32>(entry.desc.width),
-										   static_cast<Int32>(entry.desc.height));
-				++statistics.m_texturesCreated;
-				CCT_ASSERT(entry.physical != nullptr,
-						   "RenderGraphResourceRegistry::Allocate: Create{}Texture failed for '{}'",
-						   entry.desc.storage ? "Storage" : "", entry.desc.name);
+				CCT_GFX_LOG_ERROR("RenderGraph", "transient '{}' of {}x{} exceeds the device limits", entry.desc.name, entry.desc.width, entry.desc.height);
+				return RenderGraphError::ResourceLimitExceeded;
 			}
+			std::shared_ptr<Texture> created = entry.desc.storage
+												   ? device.CreateStorageTexture(entry.desc.format, static_cast<Int32>(entry.desc.width), static_cast<Int32>(entry.desc.height))
+												   : device.CreateTexture(entry.desc.format, static_cast<Int32>(entry.desc.width), static_cast<Int32>(entry.desc.height));
+			if (created == nullptr)
+			{
+				CCT_GFX_LOG_ERROR("RenderGraph", "transient '{}' of {}x{} could not be created", entry.desc.name, entry.desc.width, entry.desc.height);
+				return RenderGraphError::ResourceCreationFailed;
+			}
+			entry.physical = std::move(created);
+			entry.currentLayout = ImageLayout::Undefined;
+			++statistics.m_texturesCreated;
 		}
 
 		for (auto& entry : m_buffers)
@@ -102,25 +151,27 @@ namespace cct::gfx::rhi
 			if (entry.imported || entry.physical)
 				continue;
 
-			const size_t hash = HashDesc(entry.desc);
-			auto& pool = m_transientBufferPool[hash];
-			if (!pool.empty())
+			auto pool = m_transientBufferPool.find(KeyOf(entry.desc));
+			if (pool != m_transientBufferPool.end() && !pool->second.empty())
 			{
-				entry.physical = std::move(pool.back().physical);
-				entry.currentStage = pool.back().lastStage;
-				entry.currentAccess = pool.back().lastAccess;
-				pool.pop_back();
+				entry.physical = std::move(pool->second.back().physical);
+				entry.currentStage = pool->second.back().lastStage;
+				entry.currentAccess = pool->second.back().lastAccess;
+				pool->second.pop_back();
 				++statistics.m_buffersReused;
+				continue;
 			}
-			else
+
+			std::unique_ptr<Buffer> created = entry.desc.size == 0 ? nullptr : device.CreateBuffer(entry.desc.usage, entry.desc.size, false);
+			if (created == nullptr)
 			{
-				auto uniqueBuf = device.CreateBuffer(entry.desc.usage, entry.desc.size, false);
-				CCT_ASSERT(uniqueBuf != nullptr,
-						   "RenderGraphResourceRegistry::Allocate: CreateBuffer failed for '{}'", entry.desc.name);
-				entry.physical = std::shared_ptr<Buffer>(std::move(uniqueBuf));
-				++statistics.m_buffersCreated;
+				CCT_GFX_LOG_ERROR("RenderGraph", "transient buffer '{}' of {} bytes could not be created", entry.desc.name, entry.desc.size);
+				return RenderGraphError::ResourceCreationFailed;
 			}
+			entry.physical = std::shared_ptr<Buffer>(std::move(created));
+			++statistics.m_buffersCreated;
 		}
+		return {};
 	}
 
 	void RenderGraphResourceRegistry::ExtractTransients(
@@ -149,27 +200,43 @@ namespace cct::gfx::rhi
 
 	void RenderGraphResourceRegistry::ReturnTransientsToPool(
 		std::vector<RenderGraphResourceRegistry::TextureTransientSnapshot>& textures,
-		std::vector<RenderGraphResourceRegistry::BufferTransientSnapshot>& buffers)
+		std::vector<RenderGraphResourceRegistry::BufferTransientSnapshot>& buffers,
+		UInt64 lastUse)
 	{
-		// Bounded pool: without a cap, repeated topology rebuilds would accumulate
-		// retired resources forever (each rebuild allocates fresh transients while the
-		// previous generation is still fence-protected).
-		constexpr std::size_t kMaxPooledPerDesc = 8;
+		// Bounded per description, on top of TrimPool: a resource beyond the bound is destroyed at once, which is safe
+		// because returned resources are no longer used by the GPU.
+		constexpr std::size_t MaxPooledPerDesc = 8;
 
 		for (auto& snap : textures)
 		{
-			auto& bucket = m_transientTexturePool[HashDesc(snap.desc)];
-			if (bucket.size() < kMaxPooledPerDesc)
-				bucket.emplace_back(std::move(snap.physical), snap.lastLayout);
+			auto& bucket = m_transientTexturePool[KeyOf(snap.desc)];
+			if (bucket.size() < MaxPooledPerDesc)
+				bucket.push_back({std::move(snap.physical), snap.lastLayout, lastUse});
 		}
 		for (auto& snap : buffers)
 		{
-			auto& bucket = m_transientBufferPool[HashDesc(snap.desc)];
-			if (bucket.size() < kMaxPooledPerDesc)
-				bucket.push_back({std::move(snap.physical), snap.lastStage, snap.lastAccess});
+			auto& bucket = m_transientBufferPool[KeyOf(snap.desc)];
+			if (bucket.size() < MaxPooledPerDesc)
+				bucket.push_back({std::move(snap.physical), snap.lastStage, snap.lastAccess, lastUse});
 		}
 		textures.clear();
 		buffers.clear();
+	}
+
+	void RenderGraphResourceRegistry::TrimPool(UInt64 lastExecution, UInt64 idleExecutions)
+	{
+		const auto idle = [lastExecution, idleExecutions](UInt64 lastUse)
+		{ return lastExecution >= lastUse + idleExecutions; };
+		for (auto& [key, bucket] : m_transientTexturePool)
+			std::erase_if(bucket, [&](const PooledTexture& pooled)
+						  { return idle(pooled.lastUse); });
+		for (auto& [key, bucket] : m_transientBufferPool)
+			std::erase_if(bucket, [&](const PooledBuffer& pooled)
+						  { return idle(pooled.lastUse); });
+		std::erase_if(m_transientTexturePool, [](const auto& item)
+					  { return item.second.empty(); });
+		std::erase_if(m_transientBufferPool, [](const auto& item)
+					  { return item.second.empty(); });
 	}
 
 	void RenderGraphResourceRegistry::ClearEntries()
@@ -239,6 +306,13 @@ namespace cct::gfx::rhi
 		return *m_textures[handle.index].physical;
 	}
 
+	const std::shared_ptr<Texture>& RenderGraphResourceRegistry::GetTexturePointer(RGTextureHandle handle) const
+	{
+		CCT_ASSERT(handle.index < m_textures.size(),
+				   "RenderGraphResourceRegistry::GetTexturePointer: invalid handle index {}", handle.index);
+		return m_textures[handle.index].physical;
+	}
+
 	Buffer& RenderGraphResourceRegistry::GetBuffer(RGBufferHandle handle)
 	{
 		CCT_ASSERT(handle.index < m_buffers.size() && m_buffers[handle.index].physical != nullptr,
@@ -267,20 +341,19 @@ namespace cct::gfx::rhi
 		return m_buffers[handle.index].imported;
 	}
 
-	size_t RenderGraphResourceRegistry::HashDesc(const RGTextureDesc& desc)
+	std::size_t RenderGraphResourceRegistry::GetPooledTextureCount() const
 	{
-		size_t h = std::hash<UInt32>{}(desc.width);
-		h ^= std::hash<UInt32>{}(desc.height) + 0x9e3779b9u + (h << 6) + (h >> 2);
-		h ^= std::hash<UInt8>{}(static_cast<UInt8>(desc.format)) + 0x9e3779b9u + (h << 6) + (h >> 2);
-		h ^= std::hash<bool>{}(desc.isDepth) + 0x9e3779b9u + (h << 6) + (h >> 2);
-		h ^= std::hash<bool>{}(desc.storage) + 0x9e3779b9u + (h << 6) + (h >> 2);
-		return h;
+		std::size_t count = 0;
+		for (const auto& [key, bucket] : m_transientTexturePool)
+			count += bucket.size();
+		return count;
 	}
 
-	size_t RenderGraphResourceRegistry::HashDesc(const RGBufferDesc& desc)
+	std::size_t RenderGraphResourceRegistry::GetPooledBufferCount() const
 	{
-		size_t h = std::hash<UInt32>{}(desc.size);
-		h ^= std::hash<UInt32>{}(desc.usage.Value()) + 0x9e3779b9u + (h << 6) + (h >> 2);
-		return h;
+		std::size_t count = 0;
+		for (const auto& [key, bucket] : m_transientBufferPool)
+			count += bucket.size();
+		return count;
 	}
 } // namespace cct::gfx::rhi

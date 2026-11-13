@@ -6,6 +6,7 @@
 #include <chrono>
 #include <span>
 
+#include <Concerto/Core/Logger/Logger.hpp>
 #include <Concerto/Core/Math/Algorithm.hpp>
 #include <Concerto/Graphics/Core/Camera/Camera.hpp>
 #include <Concerto/Graphics/Core/Camera/GPUData.hpp>
@@ -190,10 +191,13 @@ int main()
 			rhi::CommandBuffer& commandBuffer = currentFrame.GetCommandBuffer();
 			commandBuffer.Reset();
 			commandBuffer.Begin();
-			{
-				renderer.DrawFrame(commandBuffer, target, view);
-			}
+			const bool drawn = renderer.DrawFrame(commandBuffer, target, view).IsOk();
 			commandBuffer.End();
+			if (!drawn)
+			{
+				Logger::Error("RenderGraph example: the frame's resources could not be allocated");
+				break;
+			}
 			currentFrame.Present();
 			window->SetTitle(std::format("ConcertoGraphics - {} fps", 1.f / deltaTime));
 		}

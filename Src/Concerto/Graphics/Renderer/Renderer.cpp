@@ -43,7 +43,7 @@ namespace cct::gfx
 		m_graph.Compile();
 	}
 
-	void Renderer::DrawFrame(rhi::CommandBuffer& cmd, const RenderTarget& target, const View& view)
+	Result<void, rhi::RenderGraphError> Renderer::DrawFrame(rhi::CommandBuffer& cmd, const RenderTarget& target, const View& view)
 	{
 		m_graph.Reset();
 
@@ -55,6 +55,6 @@ namespace cct::gfx
 		for (const auto& feature : m_features)
 			feature->UpdateFrameData(view);
 
-		m_graph.Execute(cmd, target.width, target.height);
+		return m_graph.Execute(cmd, target.width, target.height);
 	}
 } // namespace cct::gfx

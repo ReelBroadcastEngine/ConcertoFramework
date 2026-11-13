@@ -2,6 +2,7 @@
 #define CONCERTO_GRAPHICS_RHI_RENDERGRAPH_STATISTICS_HPP
 
 #include <chrono>
+#include <cstddef>
 
 #include "Concerto/Graphics/RHI/Defines.hpp"
 
@@ -44,6 +45,22 @@ namespace cct::gfx::rhi
 		std::chrono::nanoseconds m_gpuGraphicsTime{0};
 		std::chrono::nanoseconds m_gpuComputeTime{0};
 		std::chrono::nanoseconds m_gpuTransferTime{0};
+	};
+
+	// What a RenderGraph holds at one moment.
+	struct RenderGraphResidency
+	{
+		// Physical transients assigned to the current declaration.
+		std::size_t m_assignedTextures = 0;
+		// Transients retired by Clear and not yet known to be unused by the GPU.
+		std::size_t m_retiredTextures = 0;
+		// Transients the GPU no longer uses, kept for the next declarations.
+		std::size_t m_pooledTextures = 0;
+		std::size_t m_cachedFrameBuffers = 0;
+		std::size_t m_cachedRenderPasses = 0;
+		// Framebuffers and render passes retired and not yet known to be unused by the GPU.
+		std::size_t m_retiredFrameBuffers = 0;
+		std::size_t m_retiredRenderPasses = 0;
 	};
 } // namespace cct::gfx::rhi
 

@@ -4,6 +4,7 @@
 
 #include "Concerto/Graphics/RenderGraph/RenderGraph.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <format>
 #include <ostream>
@@ -116,21 +117,21 @@ namespace cct::gfx::rhi
 	void RenderGraph::Compile()
 	{
 		const Clock::time_point start = Clock::now();
-		RetireCompiledPasses();
 		m_compiledPasses = m_compiler.Compile(m_passes, m_registry, m_device, m_finalOutput, m_statistics);
 		m_dirty = false;
 		++m_statistics.m_compilations;
 		m_statistics.m_compileTime += Clock::now() - start;
 	}
 
-	void RenderGraph::AllocateResources()
+	Result<void, RenderGraphError> RenderGraph::AllocateResources()
 	{
 		if (m_dirty)
 			Compile();
 
 		const Clock::time_point start = Clock::now();
-		m_registry.Allocate(m_device, m_statistics);
+		Result<void, RenderGraphError> allocated = m_registry.Allocate(m_device, m_statistics);
 		m_statistics.m_allocationTime += Clock::now() - start;
+		return allocated;
 	}
 
 	Texture& RenderGraph::GetTexture(RGTextureHandle handle)
@@ -155,28 +156,14 @@ namespace cct::gfx::rhi
 		throw std::runtime_error(std::format("RenderGraph::GetPassRenderPass: no compiled render pass for '{}' (culled, never declared, or Compile() not called)", name));
 	}
 
-	void RenderGraph::RetireCompiledPasses()
+	Result<void, RenderGraphError> RenderGraph::Execute(CommandBuffer& cmd, UInt32 frameWidth, UInt32 frameHeight)
 	{
-		for (RGCompiledPass& cp : m_compiledPasses)
-		{
-			for (auto& cached : cp.frameBufferCache)
-			{
-				if (cached.frameBuffer)
-					m_retired.frameBuffers.push_back(std::move(cached.frameBuffer));
-				for (auto& view : cached.attachmentViews)
-					m_retired.attachmentViews.push_back(std::move(view));
-			}
-			cp.frameBufferCache.clear();
-			if (cp.renderPass)
-				m_retired.renderPasses.push_back(std::move(cp.renderPass));
-		}
-	}
-
-	void RenderGraph::Execute(CommandBuffer& cmd, UInt32 frameWidth, UInt32 frameHeight)
-	{
-		AllocateResources();
+		Result<void, RenderGraphError> allocated = AllocateResources();
+		if (allocated.IsError())
+			return allocated;
 		const Clock::time_point recordStart = Clock::now();
 		++m_statistics.m_executions;
+		const UInt64 execution = ++m_lastExecution;
 		const UInt32 timestampCount = GetTimestampQueryCount();
 		const bool timed = m_timestampPool != nullptr && m_timestampPool->GetCapacity() >= timestampCount;
 		m_timedPassTypes.clear();
@@ -274,61 +261,9 @@ namespace cct::gfx::rhi
 					emitBarriersForPass(mp);
 				}
 
-				std::vector<const Texture*> attachmentIdentity;
-				attachmentIdentity.reserve(pass.colorAttachments.size() + (pass.depthAttachment.has_value() ? 1 : 0));
-				for (const RGTextureHandle colorHandle : pass.colorAttachments)
-					attachmentIdentity.push_back(&m_registry.GetTexture(colorHandle));
-				if (pass.depthAttachment.has_value())
-					attachmentIdentity.push_back(&m_registry.GetTexture(*pass.depthAttachment));
-
-				RGCompiledPass::CachedFrameBuffer* cachedFrameBuffer = nullptr;
-				for (auto& cached : compiled.frameBufferCache)
-				{
-					if (cached.attachmentIdentity == attachmentIdentity)
-					{
-						cachedFrameBuffer = &cached;
-						break;
-					}
-				}
-
-				if (!cachedFrameBuffer)
-				{
-					const Clock::time_point frameBufferStart = Clock::now();
-					std::vector<std::unique_ptr<TextureView>> views;
-					views.reserve(attachmentIdentity.size());
-
-					for (const RGTextureHandle colorHandle : pass.colorAttachments)
-						views.push_back(m_registry.GetTexture(colorHandle).CreateView());
-
-					if (pass.depthAttachment.has_value())
-						views.push_back(m_registry.GetTexture(*pass.depthAttachment).CreateView());
-
-					UInt32 fbWidth = frameWidth, fbHeight = frameHeight;
-					if (!pass.colorAttachments.empty())
-					{
-						const auto& desc = m_registry.GetDesc(pass.colorAttachments[0]);
-						if (desc.width > 0 && desc.height > 0)
-							fbWidth = desc.width, fbHeight = desc.height;
-					}
-					else if (pass.depthAttachment.has_value())
-					{
-						const auto& desc = m_registry.GetDesc(*pass.depthAttachment);
-						if (desc.width > 0 && desc.height > 0)
-							fbWidth = desc.width, fbHeight = desc.height;
-					}
-
-					RGCompiledPass::CachedFrameBuffer newEntry;
-					newEntry.attachmentIdentity = attachmentIdentity;
-					newEntry.frameBuffer = m_device.CreateFrameBuffer(fbWidth, fbHeight, *compiled.renderPass, views);
-					++m_statistics.m_frameBuffersCreated;
-					newEntry.attachmentViews = std::move(views);
-					compiled.frameBufferCache.push_back(std::move(newEntry));
-					cachedFrameBuffer = &compiled.frameBufferCache.back();
-					m_statistics.m_frameBufferCreationTime += Clock::now() - frameBufferStart;
-				}
-
-				m_currentFrameBuffer = cachedFrameBuffer->frameBuffer.get();
-				activeRenderPass = compiled.renderPass.get();
+				m_compiler.MarkRenderPassUsed(compiled.renderPass, execution);
+				m_currentFrameBuffer = AcquireFrameBuffer(pass, *compiled.renderPass, frameWidth, frameHeight, execution).frameBuffer.get();
+				activeRenderPass = compiled.renderPass;
 				cmd.BeginRenderPass(*compiled.renderPass, *m_currentFrameBuffer, m_clearColor);
 			}
 
@@ -364,6 +299,7 @@ namespace cct::gfx::rhi
 			m_registry.SetCurrentLayout(handle, exportLayout);
 		}
 		m_statistics.m_recordTime += Clock::now() - recordStart;
+		return {};
 	}
 
 	void RenderGraph::Reset()
@@ -371,13 +307,13 @@ namespace cct::gfx::rhi
 		const Clock::time_point start = Clock::now();
 		m_pendingFrames.push_back(std::move(m_retired));
 		m_retired = {};
-
 		while (m_pendingFrames.size() > m_maxFramesInFlight)
 		{
-			auto& oldest = m_pendingFrames.front();
-			m_registry.ReturnTransientsToPool(oldest.transientTextures, oldest.transientBuffers);
+			ReleaseRetired(m_pendingFrames.front());
 			m_pendingFrames.pop_front();
 		}
+		RetireIdleObjects();
+		ReleaseCompletedResources();
 
 		m_registry.Reset();
 		m_statistics.m_resetTime += Clock::now() - start;
@@ -406,19 +342,153 @@ namespace cct::gfx::rhi
 	void RenderGraph::Clear()
 	{
 		const Clock::time_point start = Clock::now();
+		const std::size_t retiredTextures = m_retired.transientTextures.size();
+		const std::size_t retiredBuffers = m_retired.transientBuffers.size();
 		m_registry.ExtractTransients(m_retired.transientTextures, m_retired.transientBuffers);
-		RetireCompiledPasses();
+		if (m_retired.transientTextures.size() != retiredTextures || m_retired.transientBuffers.size() != retiredBuffers)
+			m_retired.lastUse = std::max(m_retired.lastUse, m_lastExecution);
 		m_passes.clear();
 		m_compiledPasses.clear();
 		m_registry.ClearEntries();
 		m_finalOutput = {};
 		m_dirty = true;
+		RetireIdleObjects();
+		ReleaseCompletedResources();
 		m_statistics.m_clearTime += Clock::now() - start;
 	}
 
 	const RenderGraphStatistics& RenderGraph::GetStatistics() const
 	{
 		return m_statistics;
+	}
+
+	RenderGraphResidency RenderGraph::GetResidency() const
+	{
+		RenderGraphResidency residency;
+		for (UInt32 texture = 0; texture < m_registry.TextureCount(); ++texture)
+		{
+			const RGTextureHandle handle{static_cast<UInt16>(texture), 0};
+			if (!m_registry.IsImported(handle) && m_registry.GetTexturePointer(handle) != nullptr)
+				++residency.m_assignedTextures;
+		}
+		const auto countRetired = [&residency](const RetiredResources& retired)
+		{
+			residency.m_retiredTextures += retired.transientTextures.size();
+			residency.m_retiredFrameBuffers += retired.frameBuffers.size();
+			residency.m_retiredRenderPasses += retired.renderPasses.size();
+		};
+		countRetired(m_retired);
+		for (const RetiredResources& pending : m_pendingFrames)
+			countRetired(pending);
+		residency.m_pooledTextures = m_registry.GetPooledTextureCount();
+		residency.m_cachedFrameBuffers = m_frameBufferCache.size();
+		residency.m_cachedRenderPasses = m_compiler.GetCachedRenderPassCount();
+		return residency;
+	}
+
+	UInt64 RenderGraph::GetLastExecution() const
+	{
+		return m_lastExecution;
+	}
+
+	void RenderGraph::MarkExecutionsComplete(UInt64 execution)
+	{
+		m_completedExecution = std::max(m_completedExecution, std::min(execution, m_lastExecution));
+		ReleaseCompletedResources();
+	}
+
+	void RenderGraph::SetIdleExecutionLimit(UInt32 executions)
+	{
+		m_idleExecutionLimit = std::max<UInt32>(executions, 1);
+	}
+
+	RenderGraph::CachedFrameBuffer& RenderGraph::AcquireFrameBuffer(const RGPass& pass, const RenderPass& renderPass, UInt32 frameWidth, UInt32 frameHeight, UInt64 execution)
+	{
+		std::vector<RGTextureHandle> attachmentHandles = pass.colorAttachments;
+		if (pass.depthAttachment.has_value())
+			attachmentHandles.push_back(*pass.depthAttachment);
+
+		UInt32 width = frameWidth;
+		UInt32 height = frameHeight;
+		if (!attachmentHandles.empty())
+		{
+			const RGTextureDesc& desc = m_registry.GetDesc(attachmentHandles.front());
+			if (desc.width > 0 && desc.height > 0)
+			{
+				width = desc.width;
+				height = desc.height;
+			}
+		}
+
+		const auto matches = [&](const CachedFrameBuffer& cached)
+		{
+			if (cached.renderPass != &renderPass || cached.width != width || cached.height != height || cached.attachments.size() != attachmentHandles.size())
+				return false;
+			return std::ranges::equal(cached.attachments, attachmentHandles, [this](const std::shared_ptr<Texture>& texture, RGTextureHandle handle)
+									  { return texture == m_registry.GetTexturePointer(handle); });
+		};
+		const auto found = std::ranges::find_if(m_frameBufferCache, matches);
+		if (found != m_frameBufferCache.end())
+		{
+			found->lastUse = execution;
+			return *found;
+		}
+
+		const Clock::time_point start = Clock::now();
+		CachedFrameBuffer entry;
+		entry.renderPass = &renderPass;
+		entry.width = width;
+		entry.height = height;
+		entry.lastUse = execution;
+		for (const RGTextureHandle handle : attachmentHandles)
+		{
+			entry.attachments.push_back(m_registry.GetTexturePointer(handle));
+			entry.views.push_back(m_registry.GetTexture(handle).CreateView());
+		}
+		entry.frameBuffer = m_device.CreateFrameBuffer(width, height, renderPass, entry.views);
+		++m_statistics.m_frameBuffersCreated;
+		m_statistics.m_frameBufferCreationTime += Clock::now() - start;
+		m_frameBufferCache.push_back(std::move(entry));
+		return m_frameBufferCache.back();
+	}
+
+	void RenderGraph::RetireIdleObjects()
+	{
+		const UInt64 limit = m_idleExecutionLimit;
+		const auto isIdle = [this, limit](UInt64 lastUse)
+		{ return m_lastExecution >= lastUse + limit; };
+		std::erase_if(m_frameBufferCache, [&](CachedFrameBuffer& cached)
+					  {
+						  if (!isIdle(cached.lastUse))
+							  return false;
+						  m_retired.lastUse = std::max(m_retired.lastUse, cached.lastUse);
+						  m_retired.frameBuffers.push_back(std::move(cached));
+						  return true; });
+		const std::size_t retiredRenderPasses = m_retired.renderPasses.size();
+		const UInt64 renderPassLastUse = m_compiler.RetireIdleRenderPasses(m_lastExecution, limit, m_compiledPasses, m_retired.renderPasses);
+		if (m_retired.renderPasses.size() != retiredRenderPasses)
+			m_retired.lastUse = std::max(m_retired.lastUse, renderPassLastUse);
+		m_registry.TrimPool(m_lastExecution, limit);
+	}
+
+	void RenderGraph::ReleaseCompletedResources()
+	{
+		if (m_retired.lastUse <= m_completedExecution)
+			ReleaseRetired(m_retired);
+		std::erase_if(m_pendingFrames, [this](RetiredResources& pending)
+					  {
+						  if (pending.lastUse > m_completedExecution)
+							  return false;
+						  ReleaseRetired(pending);
+						  return true; });
+	}
+
+	void RenderGraph::ReleaseRetired(RetiredResources& retired)
+	{
+		retired.frameBuffers.clear();
+		m_registry.ReturnTransientsToPool(retired.transientTextures, retired.transientBuffers, retired.lastUse);
+		retired.renderPasses.clear();
+		retired.lastUse = 0;
 	}
 
 	void RenderGraph::SetTimestampQueryPool(QueryPool* pool)

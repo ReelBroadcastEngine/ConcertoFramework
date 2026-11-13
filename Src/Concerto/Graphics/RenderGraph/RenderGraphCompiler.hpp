@@ -5,6 +5,9 @@
 #ifndef CONCERTO_GRAPHICS_RHI_RENDERGRAPH_COMPILER_HPP
 #define CONCERTO_GRAPHICS_RHI_RENDERGRAPH_COMPILER_HPP
 
+#include <cstddef>
+#include <memory>
+#include <span>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -15,6 +18,7 @@
 #include "Concerto/Graphics/RenderGraph/RenderGraphStatistics.hpp"
 #include "Concerto/Graphics/RHI/Defines.hpp"
 #include "Concerto/Graphics/RHI/Enums.hpp"
+#include "Concerto/Graphics/RHI/RenderPass.hpp"
 
 namespace cct::gfx::rhi
 {
@@ -24,6 +28,13 @@ namespace cct::gfx::rhi
 	class CONCERTO_GRAPHICS_RHI_BASE_API RenderGraphCompiler
 	{
 	public:
+		RenderGraphCompiler() = default;
+		~RenderGraphCompiler() = default;
+		RenderGraphCompiler(const RenderGraphCompiler&) = delete;
+		RenderGraphCompiler(RenderGraphCompiler&&) noexcept = default;
+		RenderGraphCompiler& operator=(const RenderGraphCompiler&) = delete;
+		RenderGraphCompiler& operator=(RenderGraphCompiler&&) noexcept = default;
+
 		std::vector<RGCompiledPass> Compile(
 			std::vector<RGPass>& passes,
 			RenderGraphResourceRegistry& registry,
@@ -43,7 +54,25 @@ namespace cct::gfx::rhi
 		static std::pair<PipelineStageFlags, MemoryAccessFlags>
 		BufferAccessParams(RGPassType type, RGResourceAccess access);
 
+		// Render passes outlive compilations: a compiled pass refers to a cached one, created once per distinct attachment
+		// description. Records that execution began renderPass.
+		void MarkRenderPassUsed(const RenderPass* renderPass, UInt64 execution);
+		// Moves into retired the cached render passes that no pass of inUse refers to and that no execution used in the
+		// idleExecutions executions up to lastExecution. Returns the serial of the last execution that used one of them.
+		UInt64 RetireIdleRenderPasses(UInt64 lastExecution, UInt64 idleExecutions, std::span<const RGCompiledPass> inUse, std::vector<std::unique_ptr<RenderPass>>& retired);
+		[[nodiscard]] std::size_t GetCachedRenderPassCount() const;
+
 	private:
+		struct CachedRenderPass
+		{
+			std::vector<RenderPass::Attachment> attachments;
+			bool hasDepth = false;
+			std::unique_ptr<RenderPass> renderPass;
+			UInt64 lastUse = 0;
+		};
+
+		RenderPass* AcquireRenderPass(std::vector<RenderPass::Attachment>&& attachments, bool hasDepth, Device& device, RenderGraphStatistics& statistics);
+
 		struct PassDep
 		{
 			std::vector<UInt32> incoming; // passes this pass depends on
@@ -60,6 +89,7 @@ namespace cct::gfx::rhi
 		std::unordered_map<UInt16, UInt32> m_bufferLastWriter;
 		std::vector<PassDep> m_deps;
 		std::vector<std::vector<UInt32>> m_adjOut; // outgoing edges: adjOut[A] = {B,...} A→B
+		std::vector<CachedRenderPass> m_renderPassCache;
 	};
 } // namespace cct::gfx::rhi
 
