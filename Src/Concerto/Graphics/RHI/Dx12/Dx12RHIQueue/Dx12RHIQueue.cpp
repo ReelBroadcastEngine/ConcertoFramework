@@ -38,7 +38,10 @@ namespace cct::gfx::rhi
 	void Dx12RHIQueue::Submit(CommandBuffer& cmdBuf, Fence* fence)
 	{
 		if (!m_queue)
+		{
+			CCT_RHI_LOG_ERROR("Dx12RHIQueue: no command queue; the submission is dropped");
 			return;
+		}
 
 		if (LogIfDeviceRemoved(*m_device, "Submit (before ExecuteCommandLists)"))
 			return;
@@ -56,5 +59,9 @@ namespace cct::gfx::rhi
 			auto& dx12RHIFence = Cast<Dx12RHIFence&>(*fence);
 			dx12RHIFence.GetFence().Signal(*m_queue);
 		}
+	}
+	void Dx12RHIQueue::SetNativeQueue(ID3D12CommandQueue* queue)
+	{
+		m_queue = queue;
 	}
 } // namespace cct::gfx::rhi

@@ -627,6 +627,8 @@ namespace cct::gfx::rhi
 	void Dx12RHIDevice::RegisterRenderQueue(ID3D12CommandQueue* queue)
 	{
 		m_renderQueue = queue;
+		if (m_graphicsQueue)
+			m_graphicsQueue->SetNativeQueue(queue);
 	}
 
 	void Dx12RHIDevice::EnsureRenderQueue()
@@ -669,7 +671,7 @@ namespace cct::gfx::rhi
 
 		if (!m_graphicsQueue)
 		{
-			CCT_ASSERT(m_renderQueue, "ConcertoGraphics: Render queue not registered");
+			EnsureRenderQueue();
 			m_graphicsQueue = std::make_unique<Dx12RHIQueue>(m_renderQueue, *this);
 		}
 
