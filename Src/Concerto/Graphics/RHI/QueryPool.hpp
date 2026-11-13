@@ -36,7 +36,9 @@ namespace cct::gfx::rhi
 
 		// Reads the timestamps [first, first + ticks.size()) in ticks, masked to the bits the queue writes. Returns
 		// false, leaving ticks unspecified, when the range exceeds the capacity or one of the queries has no available
-		// value: not written since its last reset, or written by a submission that has not completed.
+		// value: not written since its last reset, or, on Vulkan, written by a submission that has not completed. Direct3D
+		// 12 has no availability: there, a query counts as available once its write was recorded, and reading it before
+		// its submission completed returns stale values.
 		[[nodiscard]] virtual bool ReadTimestamps(UInt32 first, std::span<UInt64> ticks) = 0;
 
 	protected:

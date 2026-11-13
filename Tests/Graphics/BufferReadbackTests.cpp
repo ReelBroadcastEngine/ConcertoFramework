@@ -56,7 +56,9 @@ namespace
 		for (std::size_t y = 0; y < extent.m_height; ++y)
 		{
 			for (std::size_t x = 0; x < rowBytes; ++x)
+			{
 				uploadBytes.subspan((y * rowPitch) + x).front() = PatternByte(x, y);
+			}
 		}
 		upload->UnMap();
 
@@ -80,7 +82,9 @@ namespace
 			for (std::size_t x = 0; x < rowBytes; ++x)
 			{
 				if (readBytes.subspan((y * rowPitch) + x).front() != PatternByte(x, y))
+				{
 					++mismatches;
+				}
 			}
 		}
 		readback->UnMap();
@@ -91,7 +95,9 @@ namespace
 	{
 		const cct::tests::GraphicsTestDevice context(backend);
 		if (context.GetDevice() == nullptr)
+		{
 			SKIP("No device for this backend");
+		}
 		for (const Extent extent : Extents)
 		{
 			INFO("extent " << extent.m_width << "x" << extent.m_height);
@@ -118,7 +124,9 @@ TEST_CASE("Vulkan: buffers are allocated for their host access direction", "[gra
 {
 	const cct::tests::GraphicsTestDevice context(rhi::Instance::Backend::Vulkan);
 	if (context.GetDevice() == nullptr)
+	{
 		SKIP("No Vulkan device");
+	}
 	rhi::Device& device = *context.GetDevice();
 	const std::unique_ptr<rhi::Buffer> readback = device.CreateBuffer(static_cast<rhi::BufferUsageFlags>(rhi::BufferUsage::TransferDst) | rhi::BufferUsage::HostReadback, 4096, true);
 	const std::unique_ptr<rhi::Buffer> upload = device.CreateBuffer(static_cast<rhi::BufferUsageFlags>(rhi::BufferUsage::TransferSrc), 4096, true);
@@ -132,7 +140,9 @@ TEST_CASE("Vulkan: buffers are allocated for their host access direction", "[gra
 	CHECK_FALSE(deviceOnly->GetMemoryProperties().m_hostVisible);
 	// Vulkan does not guarantee a host-cached memory type, so only report a device that lacks one.
 	if (!readback->GetMemoryProperties().m_hostCached)
+	{
 		WARN("The readback buffer is not host-cached on this device: host reads from it are uncached");
+	}
 	CHECK(context.GetErrorCount() == 0);
 }
 // NOLINTEND(cppcoreguidelines-avoid-do-while)

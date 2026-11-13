@@ -4,6 +4,8 @@
 
 #include "Concerto/Graphics/RHI/Dx12/Dx12RHIQueue/Dx12RHIQueue.hpp"
 
+#include <stdexcept>
+
 #include <Concerto/Core/Cast.hpp>
 #include <Concerto/Core/Logger/LogMacros.hpp>
 
@@ -39,8 +41,7 @@ namespace cct::gfx::rhi
 	{
 		if (!m_queue)
 		{
-			CCT_RHI_LOG_ERROR("Dx12RHIQueue: no command queue; the submission is dropped");
-			return;
+			throw std::runtime_error("Dx12RHIQueue: no command queue to submit to");
 		}
 
 		if (LogIfDeviceRemoved(*m_device, "Submit (before ExecuteCommandLists)"))

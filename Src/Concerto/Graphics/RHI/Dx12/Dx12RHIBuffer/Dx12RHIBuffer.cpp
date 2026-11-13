@@ -31,11 +31,17 @@ namespace cct::gfx::rhi
 
 		D3D12_HEAP_PROPERTIES heapProperties = {};
 		if (directReadback)
+		{
 			heapProperties.Type = D3D12_HEAP_TYPE_READBACK;
+		}
 		else if (allowMapping && !needsReadbackShadow)
+		{
 			heapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
+		}
 		else
+		{
 			heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+		}
 		m_hostReadback = allowMapping && needsHostReadback;
 		heapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
 		heapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
@@ -57,9 +63,13 @@ namespace cct::gfx::rhi
 
 		D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON;
 		if (heapProperties.Type == D3D12_HEAP_TYPE_UPLOAD)
+		{
 			initialState = D3D12_RESOURCE_STATE_GENERIC_READ;
+		}
 		else if (heapProperties.Type == D3D12_HEAP_TYPE_READBACK)
+		{
 			initialState = D3D12_RESOURCE_STATE_COPY_DEST;
+		}
 		m_currentState = initialState;
 
 		HRESULT hr = device.Get()->CreateCommittedResource(
@@ -146,19 +156,23 @@ namespace cct::gfx::rhi
 			return false;
 
 		auto* target = m_readbackResource ? m_readbackResource.Get() : m_resource.Get();
-		const D3D12_RANGE readRange = m_hostReadback ? D3D12_RANGE{0, m_size} : D3D12_RANGE{0, 0};
+		const D3D12_RANGE readRange = m_hostReadback ? D3D12_RANGE{.Begin = 0, .End = m_size} : D3D12_RANGE{.Begin = 0, .End = 0};
 		return SUCCEEDED(target->Map(0, &readRange, reinterpret_cast<void**>(data)));
 	}
 
 	BufferMemoryProperties Dx12RHIBuffer::GetMemoryProperties() const
 	{
-		ID3D12Resource* mapped = m_readbackResource ? m_readbackResource.Get() : m_resource.Get();
-		D3D12_HEAP_PROPERTIES heap{};
+		ID3D12Resource* mapped = m_readbackResource != nullptr ? m_readbackResource.Get() : m_resource.Get();
+		D3D12_HEAP_PROPERTIES heap{.Type = D3D12_HEAP_TYPE_DEFAULT};
 		D3D12_HEAP_FLAGS heapFlags{};
 		if (mapped == nullptr || FAILED(mapped->GetHeapProperties(&heap, &heapFlags)))
+		{
 			return {};
+		}
 		if (heap.Type != D3D12_HEAP_TYPE_CUSTOM)
+		{
 			heap = m_device->Get()->GetCustomHeapProperties(0, heap.Type);
+		}
 		const bool hostVisible = heap.CPUPageProperty != D3D12_CPU_PAGE_PROPERTY_NOT_AVAILABLE;
 		return BufferMemoryProperties{
 			.m_deviceLocal = heap.MemoryPoolPreference == D3D12_MEMORY_POOL_L1 || !hostVisible,
@@ -174,7 +188,7 @@ namespace cct::gfx::rhi
 			return;
 
 		auto* target = m_readbackResource ? m_readbackResource.Get() : m_resource.Get();
-		const D3D12_RANGE nothingWritten{0, 0};
+		const D3D12_RANGE nothingWritten{.Begin = 0, .End = 0};
 		target->Unmap(0, m_hostReadback ? &nothingWritten : nullptr);
 	}
 } // namespace cct::gfx::rhi

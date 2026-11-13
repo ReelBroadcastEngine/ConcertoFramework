@@ -28,7 +28,9 @@ namespace cct::gfx::vk
 		m_usage(usage)
 	{
 		if (Create(allocator, allocSize, usage, memoryUsage, hostAccess) != VK_SUCCESS)
+		{
 			throw VkException(GetLastResult());
+		}
 	}
 
 	Buffer::Buffer(Buffer&& other) noexcept :
@@ -129,7 +131,9 @@ namespace cct::gfx::vk
 		CCT_ASSERT(IsValid(), "Invalid object state, 'Create' must be called");
 
 		if (vmaMapMemory(*m_allocator->Get(), m_allocation, reinterpret_cast<void**>(data)) != VK_SUCCESS)
+		{
 			return false;
+		}
 		if (m_hostAccess == HostAccess::Random && !m_hostCoherent &&
 			vmaInvalidateAllocation(*m_allocator->Get(), m_allocation, 0, VK_WHOLE_SIZE) != VK_SUCCESS)
 		{
@@ -153,7 +157,10 @@ namespace cct::gfx::vk
 		if (m_hostAccess == HostAccess::SequentialWrite && !m_hostCoherent)
 		{
 			const VkResult flushed = vmaFlushAllocation(*m_allocator->Get(), m_allocation, 0, VK_WHOLE_SIZE);
-			CCT_ASSERT(flushed == VK_SUCCESS, "ConcertoGraphics: vmaFlushAllocation failed VkResult={}", static_cast<int>(flushed));
+			if (flushed != VK_SUCCESS)
+			{
+				CCT_GFX_LOG_ERROR("Vulkan", "vmaFlushAllocation failed (VkResult {}): host writes may not reach the device", static_cast<int>(flushed));
+			}
 		}
 		vmaUnmapMemory(*m_allocator->Get(), m_allocation);
 	}

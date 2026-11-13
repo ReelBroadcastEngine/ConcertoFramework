@@ -21,7 +21,7 @@ namespace cct::gfx::rhi
 
 	Dx12RHIQueryPool::~Dx12RHIQueryPool()
 	{
-		const D3D12_RANGE nothingWritten{0, 0};
+		const D3D12_RANGE nothingWritten{.Begin = 0, .End = 0};
 		m_readbackBuffer->Unmap(0, &nothingWritten);
 	}
 
@@ -38,10 +38,14 @@ namespace cct::gfx::rhi
 	bool Dx12RHIQueryPool::ReadTimestamps(UInt32 first, std::span<UInt64> ticks)
 	{
 		if (first > m_written.size() || ticks.size() > m_written.size() - first)
+		{
 			return false;
+		}
 		const std::span<const UInt8> written = std::span<const UInt8>(m_written).subspan(first, ticks.size());
 		if (std::ranges::find(written, UInt8{0}) != written.end())
+		{
 			return false;
+		}
 		std::ranges::copy(m_readback.subspan(first, ticks.size()), ticks.begin());
 		return true;
 	}
@@ -59,13 +63,17 @@ namespace cct::gfx::rhi
 	void Dx12RHIQueryPool::MarkReset(UInt32 first, UInt32 count)
 	{
 		if (first >= m_written.size())
+		{
 			return;
+		}
 		std::ranges::fill(std::span<UInt8>(m_written).subspan(first, std::min<std::size_t>(count, m_written.size() - first)), UInt8{0});
 	}
 
 	void Dx12RHIQueryPool::MarkWritten(UInt32 index)
 	{
 		if (index < m_written.size())
+		{
 			std::span<UInt8>(m_written).subspan(index).front() = 1;
+		}
 	}
 } // namespace cct::gfx::rhi

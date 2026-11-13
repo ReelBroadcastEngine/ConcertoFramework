@@ -15,11 +15,13 @@ namespace cct::tests
 	{
 		m_logger.AddListener([this](const char* /*category*/, const char* /*channel*/, LogLevel level, std::string_view message)
 							 {
-								 if (level < LogLevel::Error)
+								 if (level < LogLevel::Error) {
 									 return;
+}
 								 const std::scoped_lock lock(m_mutex);
-								 if (m_errorCount == 0)
+								 if (m_errorCount == 0) {
 									 m_firstError = message;
+}
 								 ++m_errorCount; });
 		gfx::rhi::Instance::SetLogger(m_logger);
 		const EnumFlags<gfx::rhi::ValidationFlags> validation = backend == gfx::rhi::Instance::Backend::Vulkan
@@ -37,13 +39,17 @@ namespace cct::tests
 			return;
 		}
 		if (m_device != nullptr)
+		{
 			m_commandPool = m_device->CreateCommandPool(gfx::rhi::QueueFamily::Graphics, gfx::rhi::CommandBufferUsage::Primary);
+		}
 	}
 
 	GraphicsTestDevice::~GraphicsTestDevice()
 	{
 		if (m_device != nullptr)
+		{
 			m_device->WaitIdle();
+		}
 	}
 
 	gfx::rhi::Device* GraphicsTestDevice::GetDevice() const

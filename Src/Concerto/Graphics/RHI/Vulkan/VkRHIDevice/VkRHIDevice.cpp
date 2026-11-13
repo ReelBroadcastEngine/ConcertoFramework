@@ -592,7 +592,7 @@ namespace cct::gfx::rhi
 		try
 		{
 			vk::Image image = vk::Device::GetAllocator().AllocateImage(
-				VkExtent2D{static_cast<UInt32>(width), static_cast<UInt32>(height)},
+				VkExtent2D{.width = static_cast<UInt32>(width), .height = static_cast<UInt32>(height)},
 				Converters::ToVulkan(format),
 				VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 			return std::make_shared<VkRHITexture>(*this, std::move(image), VK_IMAGE_ASPECT_COLOR_BIT);
@@ -616,15 +616,21 @@ namespace cct::gfx::rhi
 	std::unique_ptr<QueryPool> VkRHIDevice::CreateQueryPool(UInt32 timestampCount)
 	{
 		if (timestampCount == 0)
+		{
 			return nullptr;
+		}
 		const std::span<VkQueueFamilyProperties> families = GetPhysicalDevice().GetQueueFamilyProperties();
 		const UInt32 graphicsFamily = GetQueueFamilyIndex(vk::Queue::Type::Graphics);
 		if (graphicsFamily >= families.size())
+		{
 			return nullptr;
+		}
 		const UInt32 validBits = families.subspan(graphicsFamily).front().timestampValidBits;
 		const float timestampPeriod = GetPhysicalDevice().GetProperties().limits.timestampPeriod;
 		if (validBits == 0 || timestampPeriod <= 0.F)
+		{
 			return nullptr;
+		}
 
 		VkQueryPoolCreateInfo info{};
 		info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;

@@ -192,7 +192,9 @@ namespace cct::gfx::rhi
 	{
 		auto texture = std::make_shared<Dx12RHITexture>(*this, format, width, height);
 		if (texture->GetResource() == nullptr)
+		{
 			return nullptr;
+		}
 		return texture;
 	}
 
@@ -200,7 +202,9 @@ namespace cct::gfx::rhi
 	{
 		auto texture = std::make_shared<Dx12RHITexture>(*this, format, width, height, /* allowUnorderedAccess */ true);
 		if (texture->GetResource() == nullptr)
+		{
 			return nullptr;
+		}
 		return texture;
 	}
 
@@ -311,7 +315,9 @@ namespace cct::gfx::rhi
 	{
 		auto buffer = std::make_unique<Dx12RHIBuffer>(*this, usage, allocationSize, allowBufferMapping);
 		if (buffer->GetResource() == nullptr)
+		{
 			return nullptr;
+		}
 		return buffer;
 	}
 
@@ -643,7 +649,9 @@ namespace cct::gfx::rhi
 	{
 		m_renderQueue = queue;
 		if (m_graphicsQueue)
+		{
 			m_graphicsQueue->SetNativeQueue(queue);
+		}
 	}
 
 	void Dx12RHIDevice::EnsureRenderQueue()
@@ -704,7 +712,9 @@ namespace cct::gfx::rhi
 		ID3D12CommandQueue* queue = GetRenderQueue();
 		UINT64 frequency = 0;
 		if (timestampCount == 0 || queue == nullptr || FAILED(queue->GetTimestampFrequency(&frequency)) || frequency == 0)
+		{
 			return nullptr;
+		}
 
 		D3D12_QUERY_HEAP_DESC heapDesc{};
 		heapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
@@ -717,8 +727,7 @@ namespace cct::gfx::rhi
 			return nullptr;
 		}
 
-		D3D12_HEAP_PROPERTIES heapProperties{};
-		heapProperties.Type = D3D12_HEAP_TYPE_READBACK;
+		D3D12_HEAP_PROPERTIES heapProperties{.Type = D3D12_HEAP_TYPE_READBACK};
 		D3D12_RESOURCE_DESC resourceDesc{};
 		resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
 		resourceDesc.Width = sizeof(UInt64) * timestampCount;
@@ -734,7 +743,7 @@ namespace cct::gfx::rhi
 			CCT_RHI_LOG_WARN("Dx12RHIDevice: query readback buffer creation failed ({:#x}); GPU timestamps unavailable", static_cast<unsigned>(hr));
 			return nullptr;
 		}
-		const D3D12_RANGE readRange{0, static_cast<SIZE_T>(resourceDesc.Width)};
+		const D3D12_RANGE readRange{.Begin = 0, .End = static_cast<SIZE_T>(resourceDesc.Width)};
 		void* mapped = nullptr;
 		hr = readbackBuffer->Map(0, &readRange, &mapped);
 		if (FAILED(hr))

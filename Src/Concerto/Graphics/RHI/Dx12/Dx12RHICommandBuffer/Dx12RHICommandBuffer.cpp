@@ -411,7 +411,9 @@ namespace cct::gfx::rhi
 	void Dx12RHICommandBuffer::WriteTimestamp(QueryPool& pool, UInt32 index)
 	{
 		if (!IsValid())
+		{
 			return;
+		}
 		auto& dx12Pool = Cast<Dx12RHIQueryPool&>(pool);
 		Get()->EndQuery(dx12Pool.GetQueryHeap(), D3D12_QUERY_TYPE_TIMESTAMP, index);
 		Get()->ResolveQueryData(dx12Pool.GetQueryHeap(), D3D12_QUERY_TYPE_TIMESTAMP, index, 1, dx12Pool.GetReadbackBuffer(), UInt64{index} * sizeof(UInt64));

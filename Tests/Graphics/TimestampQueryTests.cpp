@@ -18,12 +18,16 @@ namespace
 	{
 		const cct::tests::GraphicsTestDevice context(backend);
 		if (context.GetDevice() == nullptr)
+		{
 			SKIP("No device for this backend");
+		}
 		rhi::Device& device = *context.GetDevice();
 		CHECK(device.CreateQueryPool(0) == nullptr);
 		const std::unique_ptr<rhi::QueryPool> pool = device.CreateQueryPool(4);
 		if (pool == nullptr)
+		{
 			SKIP("The graphics queue has no timestamp support");
+		}
 		CHECK(pool->GetCapacity() == 4);
 		CHECK(pool->GetTimestampPeriod() > 0.0);
 
