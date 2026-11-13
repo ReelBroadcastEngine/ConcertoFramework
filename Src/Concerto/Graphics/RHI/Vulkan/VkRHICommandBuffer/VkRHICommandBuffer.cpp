@@ -5,6 +5,7 @@
 #include "Concerto/Graphics/RHI/Vulkan/VkRHICommandBuffer/VkRHICommandBuffer.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 
 #include <Concerto/Core/Cast.hpp>
 
@@ -277,6 +278,33 @@ namespace cct::gfx::rhi
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 			*static_cast<const vk::Buffer&>(vkBuffer).Get(),
 			1, &copyRegion);
+	}
+
+	void VkRHICommandBuffer::Copy(const Texture& src, const Texture& dst)
+	{
+		const auto& vkSource = Cast<const VkRHITexture&>(src);
+		const auto& vkDestination = Cast<const VkRHITexture&>(dst);
+		const VkExtent2D extent = vkSource.GetImage().GetExtent();
+		const VkExtent2D destinationExtent = vkDestination.GetImage().GetExtent();
+		const VkFormat format = vkSource.GetImage().GetFormat();
+		if (*vkSource.GetImage().Get() == *vkDestination.GetImage().Get() ||
+			extent.width != destinationExtent.width || extent.height != destinationExtent.height ||
+			format != vkDestination.GetImage().GetFormat() ||
+			(format >= VK_FORMAT_D16_UNORM && format <= VK_FORMAT_D32_SFLOAT_S8_UINT))
+		{
+			throw std::invalid_argument("ConcertoGraphics: a texture copy requires distinct color textures of the same size and format");
+		}
+
+		VkImageCopy region = {};
+		region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		region.srcSubresource.mipLevel = 0;
+		region.srcSubresource.baseArrayLayer = 0;
+		region.srcSubresource.layerCount = 1;
+		region.dstSubresource = region.srcSubresource;
+		region.extent = {.width = extent.width, .height = extent.height, .depth = 1};
+
+		m_device->vkCmdCopyImage(*vk::CommandBuffer::Get(), *vkSource.GetImage().Get(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, *vkDestination.GetImage().Get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+								 &region);
 	}
 
 	void VkRHICommandBuffer::TransitionImageLayout(const Texture& texture, ImageLayout oldLayout, ImageLayout newLayout)

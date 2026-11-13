@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 #include <Concerto/Core/Assert.hpp>
@@ -472,6 +473,40 @@ namespace cct::gfx::rhi
 		dstLoc.pResource = dx12Buffer.GetResource();
 		dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
 		dstLoc.PlacedFootprint = footprint;
+
+		Get()->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+	}
+
+	void Dx12RHICommandBuffer::Copy(const Texture& src, const Texture& dst)
+	{
+		if (!IsValid())
+			return;
+
+		const auto& dx12Source = Cast<const Dx12RHITexture&>(src);
+		const auto& dx12Destination = Cast<const Dx12RHITexture&>(dst);
+		const D3D12_RESOURCE_DESC sourceDesc = dx12Source.GetResource()->GetDesc();
+		const D3D12_RESOURCE_DESC destinationDesc = dx12Destination.GetResource()->GetDesc();
+		if (dx12Source.GetResource() == dx12Destination.GetResource() ||
+			sourceDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || destinationDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+			sourceDesc.Width != destinationDesc.Width || sourceDesc.Height != destinationDesc.Height ||
+			sourceDesc.Format != destinationDesc.Format ||
+			sourceDesc.DepthOrArraySize != 1 || destinationDesc.DepthOrArraySize != 1 ||
+			sourceDesc.MipLevels != 1 || destinationDesc.MipLevels != 1 ||
+			sourceDesc.SampleDesc.Count != 1 || destinationDesc.SampleDesc.Count != 1 ||
+			((sourceDesc.Flags | destinationDesc.Flags) & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
+		{
+			throw std::invalid_argument("ConcertoGraphics: a texture copy requires distinct single-sampled 2D color textures of the same size and format");
+		}
+
+		D3D12_TEXTURE_COPY_LOCATION srcLoc{};
+		srcLoc.pResource = dx12Source.GetResource();
+		srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		srcLoc.SubresourceIndex = 0;
+
+		D3D12_TEXTURE_COPY_LOCATION dstLoc{};
+		dstLoc.pResource = dx12Destination.GetResource();
+		dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		dstLoc.SubresourceIndex = 0;
 
 		Get()->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
 	}
