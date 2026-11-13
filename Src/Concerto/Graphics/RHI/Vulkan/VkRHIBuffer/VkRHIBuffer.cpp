@@ -4,12 +4,23 @@
 
 #include "Concerto/Graphics/RHI/Vulkan/VkRHIBuffer/VkRHIBuffer.hpp"
 
+#include "Concerto/Graphics/RHI/CommandBuffer.hpp"
 #include "Concerto/Graphics/RHI/Vulkan/Utils/Utils.hpp"
 
 namespace cct::gfx::rhi
 {
+	namespace
+	{
+		vk::Buffer::HostAccess SelectHostAccess(rhi::BufferUsageFlags usage, bool allowBufferMapping)
+		{
+			if (!allowBufferMapping)
+				return vk::Buffer::HostAccess::None;
+			return usage.Contains(BufferUsage::HostReadback) ? vk::Buffer::HostAccess::Random : vk::Buffer::HostAccess::SequentialWrite;
+		}
+	} // namespace
+
 	VkRHIBuffer::VkRHIBuffer(VkRHIDevice& device, rhi::BufferUsageFlags usage, UInt32 allocationSize, bool allowBufferMapping) :
-		vk::Buffer(device.GetAllocator(), allocationSize, Converters::ToVulkan(usage), VMA_MEMORY_USAGE_AUTO, allowBufferMapping),
+		vk::Buffer(device.GetAllocator(), allocationSize, Converters::ToVulkan(usage), VMA_MEMORY_USAGE_AUTO, SelectHostAccess(usage, allowBufferMapping)),
 		m_device(device),
 		m_allowBufferMapping(allowBufferMapping)
 	{
@@ -23,7 +34,6 @@ namespace cct::gfx::rhi
 			return false;
 		}
 		return vk::Buffer::Map(data);
-		;
 	}
 
 	void VkRHIBuffer::UnMap()
@@ -34,6 +44,11 @@ namespace cct::gfx::rhi
 			return;
 		}
 		vk::Buffer::UnMap();
+	}
+
+	void VkRHIBuffer::RecordReadback(CommandBuffer& cmd)
+	{
+		cmd.PipelineBarrier(*this, PipelineStage::AllCommands, PipelineStage::Host, MemoryAccess::MemoryWrite, MemoryAccess::HostRead);
 	}
 
 	BufferMemoryProperties VkRHIBuffer::GetMemoryProperties() const

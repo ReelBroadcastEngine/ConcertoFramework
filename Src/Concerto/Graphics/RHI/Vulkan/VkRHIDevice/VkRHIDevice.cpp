@@ -7,6 +7,7 @@
 #include <Concerto/Core/Assert.hpp>
 #include <Concerto/Core/Cast.hpp>
 
+#include "Concerto/Graphics/Backend/Vulkan/VkException.hpp"
 #include "Concerto/Graphics/Backend/Vulkan/Wrapper/Image/Image.hpp"
 #include "Concerto/Graphics/Backend/Vulkan/Wrapper/Instance/Instance.hpp"
 #include "Concerto/Graphics/Backend/Vulkan/Wrapper/PhysicalDevice/PhysicalDevice.hpp"
@@ -206,7 +207,15 @@ namespace cct::gfx::rhi
 
 	std::unique_ptr<rhi::Buffer> VkRHIDevice::CreateBuffer(rhi::BufferUsageFlags usage, UInt32 allocationSize, bool allowBufferMapping)
 	{
-		return std::make_unique<VkRHIBuffer>(*this, usage, allocationSize, allowBufferMapping);
+		try
+		{
+			return std::make_unique<VkRHIBuffer>(*this, usage, allocationSize, allowBufferMapping);
+		}
+		catch (const vk::VkException& exception)
+		{
+			CCT_RHI_LOG_WARN("VkRHIDevice: buffer of {} bytes not allocated (VkResult {})", allocationSize, static_cast<int>(exception.GetResult()));
+			return nullptr;
+		}
 	}
 
 	std::size_t VkRHIDevice::GetMinimumUniformBufferOffsetAlignment() const

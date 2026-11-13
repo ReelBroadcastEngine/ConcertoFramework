@@ -21,13 +21,13 @@ namespace cct::gfx::vk
 	{
 	}
 
-	Buffer::Buffer(Allocator& allocator, std::size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, bool allowBufferMapping) :
+	Buffer::Buffer(Allocator& allocator, std::size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, HostAccess hostAccess) :
 		Object(*allocator.GetDevice()),
 		m_allocatedSize(allocSize),
 		m_allocator(&allocator),
 		m_usage(usage)
 	{
-		if (Create(allocator, allocSize, usage, memoryUsage, allowBufferMapping) != VK_SUCCESS)
+		if (Create(allocator, allocSize, usage, memoryUsage, hostAccess) != VK_SUCCESS)
 			throw VkException(GetLastResult());
 	}
 
@@ -37,7 +37,9 @@ namespace cct::gfx::vk
 		m_allocatedSize(std::exchange(other.m_allocatedSize, 0)),
 		m_allocator(std::exchange(other.m_allocator, nullptr)),
 		m_allocation(std::exchange(other.m_allocation, nullptr)),
-		m_usage(std::exchange(other.m_usage, 0))
+		m_usage(std::exchange(other.m_usage, 0)),
+		m_hostAccess(std::exchange(other.m_hostAccess, HostAccess::None)),
+		m_hostCoherent(std::exchange(other.m_hostCoherent, true))
 	{
 	}
 
@@ -48,13 +50,15 @@ namespace cct::gfx::vk
 		std::swap(m_allocator, other.m_allocator);
 		std::swap(m_allocation, other.m_allocation);
 		std::swap(m_usage, other.m_usage);
+		std::swap(m_hostAccess, other.m_hostAccess);
+		std::swap(m_hostCoherent, other.m_hostCoherent);
 
 		Object::operator=(std::move(other));
 
 		return *this;
 	}
 
-	VkResult Buffer::Create(Allocator& allocator, std::size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, bool allowBufferMapping)
+	VkResult Buffer::Create(Allocator& allocator, std::size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, HostAccess hostAccess)
 	{
 		m_device = allocator.GetDevice();
 
@@ -67,10 +71,30 @@ namespace cct::gfx::vk
 
 		VmaAllocationCreateInfo vmaAllocInfo = {};
 		vmaAllocInfo.usage = memoryUsage;
-		vmaAllocInfo.flags = allowBufferMapping ? VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT : 0;
+		switch (hostAccess)
+		{
+			case HostAccess::None:
+				vmaAllocInfo.flags = 0;
+				break;
+			case HostAccess::SequentialWrite:
+				vmaAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+				break;
+			case HostAccess::Random:
+				vmaAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+				break;
+		}
 
 		m_lastResult = vmaCreateBuffer(*allocator.Get(), &bufferInfo, &vmaAllocInfo, &m_handle, &m_allocation, nullptr);
-		CCT_ASSERT(m_lastResult == VK_SUCCESS, "ConcertoGraphics: vmaCreateBuffer failed VkResult={}", static_cast<int>(m_lastResult));
+		if (m_lastResult != VK_SUCCESS)
+		{
+			m_handle = VK_NULL_HANDLE;
+			m_allocation = VK_NULL_HANDLE;
+			return m_lastResult;
+		}
+		m_hostAccess = hostAccess;
+		VkMemoryPropertyFlags memoryFlags = 0;
+		vmaGetAllocationMemoryProperties(*allocator.Get(), m_allocation, &memoryFlags);
+		m_hostCoherent = (memoryFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
 
 		return m_lastResult;
 	}
@@ -104,10 +128,12 @@ namespace cct::gfx::vk
 	{
 		CCT_ASSERT(IsValid(), "Invalid object state, 'Create' must be called");
 
-		const auto res = vmaMapMemory(*m_allocator->Get(), m_allocation, reinterpret_cast<void**>(data));
-		if (res != VK_SUCCESS)
+		if (vmaMapMemory(*m_allocator->Get(), m_allocation, reinterpret_cast<void**>(data)) != VK_SUCCESS)
+			return false;
+		if (m_hostAccess == HostAccess::Random && !m_hostCoherent &&
+			vmaInvalidateAllocation(*m_allocator->Get(), m_allocation, 0, VK_WHOLE_SIZE) != VK_SUCCESS)
 		{
-			CCT_ASSERT_FALSE("ConcertoGraphics: Cannot map buffer");
+			vmaUnmapMemory(*m_allocator->Get(), m_allocation);
 			return false;
 		}
 		m_mapCount++;
@@ -124,6 +150,11 @@ namespace cct::gfx::vk
 			return;
 		}
 		m_mapCount--;
+		if (m_hostAccess == HostAccess::SequentialWrite && !m_hostCoherent)
+		{
+			const VkResult flushed = vmaFlushAllocation(*m_allocator->Get(), m_allocation, 0, VK_WHOLE_SIZE);
+			CCT_ASSERT(flushed == VK_SUCCESS, "ConcertoGraphics: vmaFlushAllocation failed VkResult={}", static_cast<int>(flushed));
+		}
 		vmaUnmapMemory(*m_allocator->Get(), m_allocation);
 	}
 
@@ -146,6 +177,11 @@ namespace cct::gfx::vk
 	VkBufferUsageFlags Buffer::GetUsage() const
 	{
 		return m_usage;
+	}
+
+	Buffer::HostAccess Buffer::GetHostAccess() const
+	{
+		return m_hostAccess;
 	}
 
 	VkMemoryPropertyFlags Buffer::GetMemoryPropertyFlags() const
