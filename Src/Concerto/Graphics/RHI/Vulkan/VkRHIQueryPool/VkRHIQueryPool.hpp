@@ -5,6 +5,9 @@
 #ifndef CONCERTO_GRAPHICS_RHI_VULKAN_VK_RHI_QUERYPOOL_HPP
 #define CONCERTO_GRAPHICS_RHI_VULKAN_VK_RHI_QUERYPOOL_HPP
 
+#include <span>
+#include <vector>
+
 #include "Concerto/Graphics/RHI/QueryPool.hpp"
 #include <vulkan/vulkan.h>
 
@@ -15,23 +18,29 @@ namespace cct::gfx::rhi
 	class CONCERTO_GRAPHICS_RHI_BASE_API VkRHIQueryPool final : public QueryPool
 	{
 	public:
-		explicit VkRHIQueryPool(VkRHIDevice& device);
+		// Takes ownership of queryPool, a timestamp pool of capacity queries. timestampValidBits is the graphics queue
+		// family's, timestampPeriod the device's, in nanoseconds per tick.
+		VkRHIQueryPool(VkRHIDevice& device, VkQueryPool queryPool, UInt32 capacity, UInt32 timestampValidBits, double timestampPeriod);
 		~VkRHIQueryPool() override;
 
-		void BeginFrame(CommandBuffer& cmd) override;
-		void EndFrame(CommandBuffer& cmd) override;
-		float ReadLastFrameMs() const override
-		{
-			return m_lastMs;
-		}
+		VkRHIQueryPool(const VkRHIQueryPool&) = delete;
+		VkRHIQueryPool(VkRHIQueryPool&&) = delete;
+		VkRHIQueryPool& operator=(const VkRHIQueryPool&) = delete;
+		VkRHIQueryPool& operator=(VkRHIQueryPool&&) = delete;
+
+		[[nodiscard]] UInt32 GetCapacity() const override;
+		[[nodiscard]] double GetTimestampPeriod() const override;
+		[[nodiscard]] bool ReadTimestamps(UInt32 first, std::span<UInt64> ticks) override;
+
+		[[nodiscard]] VkQueryPool GetHandle() const;
 
 	private:
 		VkRHIDevice& m_device;
-		VkQueryPool m_queryPool = VK_NULL_HANDLE;
-		float m_timestampPeriod = 1.0F; // nanoseconds per tick
-		int m_frameIndex = 0; // double-buffer: 0 or 1
-		uint32_t m_frameCount = 0; // counts BeginFrame calls; read only after >= 2
-		float m_lastMs = 0.0F;
+		VkQueryPool m_queryPool;
+		UInt32 m_capacity;
+		UInt64 m_validMask;
+		double m_timestampPeriod;
+		std::vector<UInt64> m_results;
 	};
 } // namespace cct::gfx::rhi
 

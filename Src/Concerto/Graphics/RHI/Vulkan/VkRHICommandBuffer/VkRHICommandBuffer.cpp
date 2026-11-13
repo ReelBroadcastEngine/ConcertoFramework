@@ -17,6 +17,7 @@
 #include "Concerto/Graphics/RHI/Vulkan/VkRHIFrameBuffer/VKRHIFrameBuffer.hpp"
 #include "Concerto/Graphics/RHI/Vulkan/VkRHIPipeline/VkRHIPipeline.hpp"
 #include "Concerto/Graphics/RHI/Vulkan/VkRHIPipelineLayout/VkRHIPipelineLayout.hpp"
+#include "Concerto/Graphics/RHI/Vulkan/VkRHIQueryPool/VkRHIQueryPool.hpp"
 #include "Concerto/Graphics/RHI/Vulkan/VkRHIRenderPass/VkRHIRenderPass.hpp"
 #include "Concerto/Graphics/RHI/Vulkan/VkRHISwapChain/VkRHISwapChain.hpp"
 #include "Concerto/Graphics/RHI/Vulkan/VkRHITexture/VKRHITexture.hpp"
@@ -239,6 +240,18 @@ namespace cct::gfx::rhi
 			*vk::CommandBuffer::Get(), *static_cast<const vk::Buffer&>(vkBuffer).Get(),
 			*vkTexture.GetImage().Get(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			1, &copyRegion);
+	}
+
+	void VkRHICommandBuffer::ResetQueries(QueryPool& pool, UInt32 first, UInt32 count)
+	{
+		const auto& vkPool = Cast<const VkRHIQueryPool&>(pool);
+		m_device->vkCmdResetQueryPool(*vk::CommandBuffer::Get(), vkPool.GetHandle(), first, count);
+	}
+
+	void VkRHICommandBuffer::WriteTimestamp(QueryPool& pool, UInt32 index)
+	{
+		const auto& vkPool = Cast<const VkRHIQueryPool&>(pool);
+		m_device->vkCmdWriteTimestamp(*vk::CommandBuffer::Get(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vkPool.GetHandle(), index);
 	}
 
 	void VkRHICommandBuffer::Copy(const Texture& src, const Buffer& dst, UInt64 dstOffset)

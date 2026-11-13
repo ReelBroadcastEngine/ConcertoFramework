@@ -27,8 +27,8 @@ namespace cct::gfx::vk
 
 		VkResult Create(Device& device, bool signaled = true);
 
-		void Wait(UInt64 timeout) const;
-		void Reset() const;
+		[[nodiscard]] VkResult Wait(UInt64 timeout) const;
+		[[nodiscard]] VkResult Reset() const;
 	};
 } // namespace cct::gfx::vk
 

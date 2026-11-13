@@ -21,7 +21,20 @@ namespace cct::gfx::vk
 	{
 	public:
 		Buffer();
-		Buffer(Allocator& allocator, std::size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, bool allowBufferMapping);
+		// How the host accesses a buffer's memory, which selects the memory type. Mapped buffers stay persistently mapped.
+		enum class HostAccess : UInt8
+		{
+			// Not mapped: device-local memory.
+			None,
+			// Host writes, device reads (staging, uniforms, vertices): written sequentially, never read back, so
+			// write-combined memory is acceptable. UnMap flushes non-coherent memory.
+			SequentialWrite,
+			// Device writes, host reads (readback): host-cached memory when the device has it. Map invalidates
+			// non-coherent memory.
+			Random
+		};
+
+		Buffer(Allocator& allocator, std::size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, HostAccess hostAccess);
 		~Buffer() override;
 
 		Buffer(Buffer&&) noexcept;
@@ -30,7 +43,8 @@ namespace cct::gfx::vk
 		Buffer& operator=(Buffer&&) noexcept;
 		Buffer& operator=(const Buffer&) = delete;
 
-		VkResult Create(Allocator& allocator, std::size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, bool allowBufferMapping);
+		// Returns the failure of the allocation and leaves the buffer invalid, without asserting.
+		VkResult Create(Allocator& allocator, std::size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, HostAccess hostAccess);
 
 		template<typename T>
 		void Copy(T& object, std::size_t padding = 0);
@@ -51,6 +65,8 @@ namespace cct::gfx::vk
 		[[nodiscard]] Allocator& GetAllocator() const;
 		[[nodiscard]] std::size_t GetAllocatedSize() const;
 		[[nodiscard]] VkBufferUsageFlags GetUsage() const;
+		[[nodiscard]] VkMemoryPropertyFlags GetMemoryPropertyFlags() const;
+		[[nodiscard]] HostAccess GetHostAccess() const;
 
 	private:
 		UInt32 m_mapCount = 0;
@@ -58,6 +74,8 @@ namespace cct::gfx::vk
 		Allocator* m_allocator;
 		VmaAllocation m_allocation{VK_NULL_HANDLE};
 		VkBufferUsageFlags m_usage;
+		HostAccess m_hostAccess = HostAccess::None;
+		bool m_hostCoherent = true;
 	};
 
 } // namespace cct::gfx::vk

@@ -4,98 +4,75 @@
 
 #include "Concerto/Graphics/RHI/Vulkan/VkRHIQueryPool/VkRHIQueryPool.hpp"
 
-#include "Concerto/Graphics/Backend/Vulkan/Wrapper/CommandBuffer/CommandBuffer.hpp"
+#include <limits>
+
 #include "Concerto/Graphics/Backend/Vulkan/Wrapper/Device/Device.hpp"
-#include "Concerto/Graphics/Backend/Vulkan/Wrapper/PhysicalDevice/PhysicalDevice.hpp"
-#include "Concerto/Graphics/RHI/Defines.hpp"
-#include "Concerto/Graphics/RHI/Vulkan/VkRHICommandBuffer/VkRHICommandBuffer.hpp"
 #include "Concerto/Graphics/RHI/Vulkan/VkRHIDevice/VkRHIDevice.hpp"
 
 namespace cct::gfx::rhi
 {
-	VkRHIQueryPool::VkRHIQueryPool(VkRHIDevice& device) :
-		m_device(device)
+	VkRHIQueryPool::VkRHIQueryPool(VkRHIDevice& device, VkQueryPool queryPool, UInt32 capacity, UInt32 timestampValidBits, double timestampPeriod) :
+		m_device(device),
+		m_queryPool(queryPool),
+		m_capacity(capacity),
+		m_validMask(timestampValidBits >= 64 ? std::numeric_limits<UInt64>::max() : (UInt64{1} << timestampValidBits) - 1),
+		m_timestampPeriod(timestampPeriod)
 	{
-		auto& vkDev = static_cast<vk::Device&>(device);
-
-		VkQueryPoolCreateInfo info{};
-		info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-		info.queryType = VK_QUERY_TYPE_TIMESTAMP;
-		info.queryCount = 4; // 2 frames × 2 timestamps
-
-		const VkResult r = vkDev.vkCreateQueryPool(*vkDev.Get(), &info, nullptr, &m_queryPool);
-		if (r != VK_SUCCESS)
-		{
-			CCT_RHI_LOG_WARN("VkRHIQueryPool: vkCreateQueryPool failed ({}); GPU timing unavailable",
-							 static_cast<int>(r));
-			m_queryPool = VK_NULL_HANDLE;
-			return;
-		}
-
-		m_timestampPeriod = vkDev.GetPhysicalDevice().GetProperties().limits.timestampPeriod;
 	}
 
 	VkRHIQueryPool::~VkRHIQueryPool()
 	{
-		if (m_queryPool == VK_NULL_HANDLE)
-			return;
-		auto& vkDev = static_cast<vk::Device&>(m_device);
-		vkDev.vkDestroyQueryPool(*vkDev.Get(), m_queryPool, nullptr);
+		auto& vkDevice = static_cast<vk::Device&>(m_device);
+		vkDevice.vkDestroyQueryPool(*vkDevice.Get(), m_queryPool, nullptr);
 	}
 
-	void VkRHIQueryPool::BeginFrame(CommandBuffer& cmd)
+	UInt32 VkRHIQueryPool::GetCapacity() const
 	{
-		if (m_queryPool == VK_NULL_HANDLE)
-			return;
+		return m_capacity;
+	}
 
-		auto& vkDev = static_cast<vk::Device&>(m_device);
-		auto& vkCmd = static_cast<vk::CommandBuffer&>(static_cast<VkRHICommandBuffer&>(cmd));
-		VkCommandBuffer vkHandle = *vkCmd.Get();
+	double VkRHIQueryPool::GetTimestampPeriod() const
+	{
+		return m_timestampPeriod;
+	}
 
-		// On the very first call, reset ALL 4 queries so every slot starts in a known state.
-		// The spec requires each query to be reset before its first use.
-		if (m_frameCount == 0)
+	bool VkRHIQueryPool::ReadTimestamps(UInt32 first, std::span<UInt64> ticks)
+	{
+		if (first > m_capacity || ticks.size() > m_capacity - first)
 		{
-			vkDev.vkCmdResetQueryPool(vkHandle, m_queryPool, 0, 4);
+			return false;
+		}
+		if (ticks.empty())
+		{
+			return true;
 		}
 
-		// Read previous frame results only after both slots have been written at least once
-		// (m_frameCount >= 2 means slot 0 was written on call 0 and slot 1 on call 1).
-		if (m_frameCount >= 2)
+		// Each query yields its value followed by its availability word.
+		constexpr std::size_t WordsPerQuery = 2;
+		m_results.assign(ticks.size() * WordsPerQuery, 0);
+		auto& vkDevice = static_cast<vk::Device&>(m_device);
+		const VkResult result = vkDevice.vkGetQueryPoolResults(*vkDevice.Get(), m_queryPool, first, static_cast<UInt32>(ticks.size()), m_results.size() * sizeof(UInt64), m_results.data(),
+															   WordsPerQuery * sizeof(UInt64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+		if (result != VK_SUCCESS)
 		{
-			const int prev = 1 - m_frameIndex;
-			const auto base = static_cast<uint32_t>(prev * 2);
-			uint64_t stamps[2] = {0, 0};
-			const VkResult r = vkDev.vkGetQueryPoolResults(
-				*vkDev.Get(), m_queryPool,
-				base, 2,
-				sizeof(stamps), stamps, sizeof(uint64_t),
-				VK_QUERY_RESULT_64_BIT);
-			if (r == VK_SUCCESS && stamps[1] > stamps[0])
+			return false;
+		}
+
+		std::span<const UInt64> words = m_results;
+		for (UInt64& tick : ticks)
+		{
+			if (words.subspan(1).front() == 0)
 			{
-				const double ticks = static_cast<double>(stamps[1] - stamps[0]);
-				m_lastMs = static_cast<float>(ticks * static_cast<double>(m_timestampPeriod) / 1e6);
+				return false;
 			}
+			tick = words.front() & m_validMask;
+			words = words.subspan(WordsPerQuery);
 		}
-
-		// Reset current frame's slots and record begin timestamp
-		const auto cur = static_cast<uint32_t>(m_frameIndex * 2);
-		vkDev.vkCmdResetQueryPool(vkHandle, m_queryPool, cur, 2);
-		vkDev.vkCmdWriteTimestamp(vkHandle, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_queryPool, cur);
-		++m_frameCount;
+		return true;
 	}
 
-	void VkRHIQueryPool::EndFrame(CommandBuffer& cmd)
+	VkQueryPool VkRHIQueryPool::GetHandle() const
 	{
-		if (m_queryPool == VK_NULL_HANDLE)
-			return;
-
-		auto& vkDev = static_cast<vk::Device&>(m_device);
-		auto& vkCmd = static_cast<vk::CommandBuffer&>(static_cast<VkRHICommandBuffer&>(cmd));
-		VkCommandBuffer vkHandle = *vkCmd.Get();
-
-		const auto cur = static_cast<uint32_t>(m_frameIndex * 2);
-		vkDev.vkCmdWriteTimestamp(vkHandle, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_queryPool, cur + 1);
-		m_frameIndex ^= 1;
+		return m_queryPool;
 	}
 } // namespace cct::gfx::rhi

@@ -90,7 +90,11 @@ namespace cct::gfx::rhi
 			&clearValue,
 			IID_PPV_ARGS(&m_resource));
 
-		CCT_ASSERT(SUCCEEDED(hr), "ConcertoGraphics: Failed to create DX12 texture resource HRESULT={}", hr);
+		if (FAILED(hr))
+		{
+			CCT_RHI_LOG_WARN("Dx12RHITexture: {}x{} texture not created (HRESULT {:#x})", width, height, static_cast<unsigned>(hr));
+			m_resource.Reset();
+		}
 	}
 
 	Dx12RHITexture::Dx12RHITexture(Dx12RHIDevice& device, Microsoft::WRL::ComPtr<ID3D12Resource> resource,

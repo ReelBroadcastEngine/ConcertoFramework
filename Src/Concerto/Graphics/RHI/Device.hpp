@@ -19,6 +19,7 @@
 #include "Concerto/Graphics/RHI/Buffer.hpp"
 #include "Concerto/Graphics/RHI/CommandPool.hpp"
 #include "Concerto/Graphics/RHI/Defines.hpp"
+#include "Concerto/Graphics/RHI/DeviceLimits.hpp"
 #include "Concerto/Graphics/RHI/Enums.hpp"
 #include "Concerto/Graphics/RHI/Fence.hpp"
 #include "Concerto/Graphics/RHI/FrameBuffer.hpp"
@@ -108,15 +109,17 @@ namespace cct::gfx::rhi
 		virtual std::unique_ptr<DescriptorSet> CreateDescriptorSet(const DescriptorSetLayout& layout) = 0;
 		virtual std::size_t GetMinimumUniformBufferOffsetAlignment() const = 0;
 		virtual std::shared_ptr<Texture> CreateTexture(PixelFormat format, Int32 width, Int32 height) = 0;
+		// Returns once the device is idle or confirmed lost, so outstanding resources may be destroyed.
+		// Throws when neither state can be confirmed.
 		virtual void WaitIdle() = 0;
+		[[nodiscard]] virtual DeviceLimits GetLimits() const = 0;
 		virtual std::unique_ptr<GpuMesh> CreateMesh(const std::string& meshPath, rhi::MaterialBuilder& materialBuilder, rhi::TextureBuilder& textureBuilder, const RenderPass& renderPass) = 0;
 
 		virtual Queue& GetQueue(rhi::QueueFamily family) = 0;
 		virtual std::unique_ptr<Fence> CreateFence() = 0;
-		virtual std::unique_ptr<QueryPool> CreateQueryPool()
-		{
-			return nullptr;
-		}
+		// A pool of timestamp queries for the graphics queue; nullptr when that queue does not support timestamps or the
+		// pool cannot be created.
+		virtual std::unique_ptr<QueryPool> CreateQueryPool(UInt32 timestampCount) = 0;
 		virtual std::shared_ptr<Texture> ImportTexture(const TextureImportInfo& /*info*/)
 		{
 			return nullptr;

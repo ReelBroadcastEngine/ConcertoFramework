@@ -9,26 +9,24 @@
 
 namespace cct::gfx::vk
 {
-	Buffer Allocator::AllocateBuffer(std::size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage,
-									 bool allowBufferMapping)
+	Buffer Allocator::AllocateBuffer(std::size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, Buffer::HostAccess hostAccess)
 	{
 		CCT_ASSERT(IsValid(), "Invalid object state, 'Create' must be called");
-		return {*this, allocSize, usage, memoryUsage, allowBufferMapping};
+		return {*this, allocSize, usage, memoryUsage, hostAccess};
 	}
 
 	template<typename T>
-	Buffer Allocator::AllocateBuffer(VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, bool allowBufferMapping)
+	Buffer Allocator::AllocateBuffer(VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, Buffer::HostAccess hostAccess)
 	{
 		CCT_ASSERT(IsValid(), "Invalid object state, 'Create' must be called");
-		return {*this, sizeof(T), usage, memoryUsage, allowBufferMapping};
+		return {*this, sizeof(T), usage, memoryUsage, hostAccess};
 	}
 
 	template<typename T>
-	Buffer Allocator::AllocateBuffer(std::size_t objNumber, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage,
-									 bool allowBufferMapping)
+	Buffer Allocator::AllocateBuffer(std::size_t objNumber, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, Buffer::HostAccess hostAccess)
 	{
 		CCT_ASSERT(IsValid(), "Invalid object state, 'Create' must be called");
-		return {*this, sizeof(T) * objNumber, usage, memoryUsage, allowBufferMapping};
+		return {*this, sizeof(T) * objNumber, usage, memoryUsage, hostAccess};
 	}
 
 	inline Image Allocator::AllocateImage(VkExtent2D extent, VkFormat format, VkImageUsageFlags usageFlags)

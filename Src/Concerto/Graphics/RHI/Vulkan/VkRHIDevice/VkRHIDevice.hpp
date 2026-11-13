@@ -52,11 +52,12 @@ namespace cct::gfx::rhi
 		std::shared_ptr<Texture> CreateTexture(PixelFormat format, Int32 width, Int32 height) override;
 		std::shared_ptr<Texture> CreateStorageTexture(PixelFormat format, Int32 width, Int32 height) override;
 		void WaitIdle() override;
+		[[nodiscard]] DeviceLimits GetLimits() const override;
 		std::unique_ptr<GpuMesh> CreateMesh(const std::string& meshPath, rhi::MaterialBuilder& materialBuilder, rhi::TextureBuilder& textureBuilder, const RenderPass& renderPass) override;
 
 		Queue& GetQueue(rhi::QueueFamily family) override;
 		std::unique_ptr<Fence> CreateFence() override;
-		std::unique_ptr<QueryPool> CreateQueryPool() override;
+		std::unique_ptr<QueryPool> CreateQueryPool(UInt32 timestampCount) override;
 		std::shared_ptr<Texture> ImportTexture(const rhi::TextureImportInfo& info) override;
 		std::shared_ptr<Texture> AdoptExternalImage(void* nativeImage, PixelFormat format, Int32 width, Int32 height, Int32 planeIndex = -1) override;
 		void SetShaderModuleSearchPath(const std::filesystem::path& path) override

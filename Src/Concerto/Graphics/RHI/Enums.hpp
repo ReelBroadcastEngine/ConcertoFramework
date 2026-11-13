@@ -89,6 +89,7 @@ namespace cct::gfx::rhi
 		ComputeShader = 0x00000800,
 		Transfer = 0x00001000,
 		BottomOfPipe = 0x00002000,
+		Host = 0x00004000,
 		AllCommands = 0x00010000
 	};
 	using PipelineStageFlags = cct::EnumFlags<PipelineStage>;

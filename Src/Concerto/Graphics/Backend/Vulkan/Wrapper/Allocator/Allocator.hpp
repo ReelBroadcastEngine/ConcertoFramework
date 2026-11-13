@@ -32,11 +32,11 @@ namespace cct::gfx::vk
 
 		VkResult Create(Device& device);
 
-		inline Buffer AllocateBuffer(std::size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, bool allowBufferMapping);
+		inline Buffer AllocateBuffer(std::size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, Buffer::HostAccess hostAccess);
 		template<typename T>
-		Buffer AllocateBuffer(VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, bool allowBufferMapping);
+		Buffer AllocateBuffer(VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, Buffer::HostAccess hostAccess);
 		template<typename T>
-		Buffer AllocateBuffer(std::size_t objNumber, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, bool allowBufferMapping);
+		Buffer AllocateBuffer(std::size_t objNumber, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage, Buffer::HostAccess hostAccess);
 
 		inline Image AllocateImage(VkExtent2D extent, VkFormat format, VkImageUsageFlags usageFlags);
 	};

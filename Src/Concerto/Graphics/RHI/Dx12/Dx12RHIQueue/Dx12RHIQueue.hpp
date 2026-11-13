@@ -19,7 +19,9 @@ namespace cct::gfx::rhi
 		Dx12RHIQueue(ID3D12CommandQueue* queue, Dx12RHIDevice& device);
 		~Dx12RHIQueue() override = default;
 
-		void Submit(CommandBuffer& cmdBuf, Fence* fence = nullptr) override;
+		[[nodiscard]] Result<void, QueueError> Submit(CommandBuffer& cmdBuf, Fence* fence = nullptr) override;
+		// The swapchain of a windowed device registers its own queue after the device created this one.
+		void SetNativeQueue(ID3D12CommandQueue* queue);
 
 	private:
 		ID3D12CommandQueue* m_queue;

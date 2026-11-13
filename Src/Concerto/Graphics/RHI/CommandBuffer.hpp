@@ -23,6 +23,7 @@ namespace cct::gfx::rhi
 	class Pipeline;
 	class PipelineLayout;
 	class DescriptorSet;
+	class QueryPool;
 
 	struct TextureBarrier
 	{
@@ -58,6 +59,11 @@ namespace cct::gfx::rhi
 		virtual void Copy(const Texture& src, const Buffer& dst, UInt64 dstOffset = 0) = 0;
 		// Copies a sub-rectangle from a buffer into a texture in TransferDstOptimal layout.
 		virtual void Copy(const Buffer& src, const Texture& dst, const BufferTextureCopyRegion& region) = 0;
+		// Resets the queries [first, first + count) of pool, which must have been created by this command buffer's device.
+		// Outside a render pass.
+		virtual void ResetQueries(QueryPool& pool, UInt32 first, UInt32 count) = 0;
+		// Writes into query index of pool the GPU time at which every command recorded before this one has completed.
+		virtual void WriteTimestamp(QueryPool& pool, UInt32 index) = 0;
 		virtual void TransitionImageLayout(const Texture& texture, ImageLayout oldLayout, ImageLayout newLayout) = 0;
 
 		virtual void BindPipeline(const Pipeline& pipeline)

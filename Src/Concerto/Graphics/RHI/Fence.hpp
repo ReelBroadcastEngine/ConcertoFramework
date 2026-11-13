@@ -5,7 +5,10 @@
 #ifndef CONCERTO_GRAPHICS_RHI_FENCE_HPP
 #define CONCERTO_GRAPHICS_RHI_FENCE_HPP
 
+#include <Concerto/Core/Result/Result.hpp>
+
 #include "Concerto/Graphics/RHI/Defines.hpp"
+#include "Concerto/Graphics/RHI/QueueError.hpp"
 
 namespace cct::gfx::rhi
 {
@@ -14,8 +17,10 @@ namespace cct::gfx::rhi
 	public:
 		virtual ~Fence() = default;
 
-		virtual void Wait() = 0;
-		virtual void Reset() = 0;
+		// Succeeds only once the submission that signalled this fence since its last Reset has completed.
+		[[nodiscard]] virtual Result<void, QueueError> Wait() = 0;
+		// Valid once Wait succeeded; the fence can then be submitted again.
+		[[nodiscard]] virtual Result<void, QueueError> Reset() = 0;
 	};
 } // namespace cct::gfx::rhi
 

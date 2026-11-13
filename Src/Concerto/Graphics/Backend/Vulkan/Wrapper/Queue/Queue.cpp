@@ -44,7 +44,7 @@ namespace cct::gfx::vk
 		return m_queueFamilyIndex;
 	}
 
-	void Queue::Submit(const CommandBuffer& commandBuffer, const Semaphore* presentSemaphore, const Semaphore* renderSemaphore, const Fence& renderFence) const
+	VkResult Queue::Submit(const CommandBuffer& commandBuffer, const Semaphore* presentSemaphore, const Semaphore* renderSemaphore, const Fence& renderFence) const
 	{
 		CCT_ASSERT(IsValid(), "Invalid object state, 'Create' must be called");
 		CCT_AUTO_PROFILER_SCOPE();
@@ -62,7 +62,7 @@ namespace cct::gfx::vk
 		submit.pCommandBuffers = commandBuffer.Get();
 
 		m_lastResult = m_device->vkQueueSubmit(m_handle, 1, &submit, *renderFence.Get());
-		CCT_ASSERT(m_lastResult == VK_SUCCESS, "ConcertoGraphics: vkQueueSubmit failed VKResult={}", static_cast<int>(m_lastResult));
+		return m_lastResult;
 	}
 
 	bool Queue::Present(const Semaphore& renderSemaphore, SwapChain& swapchain, UInt32 swapchainImageIndex) const

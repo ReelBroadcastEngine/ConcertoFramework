@@ -9,6 +9,7 @@
 
 #include <Concerto/Core/Cast.hpp>
 
+#include "Concerto/Graphics/Backend/Vulkan/VkException.hpp"
 #include "Concerto/Graphics/Core/Window/Window.hpp"
 #include "Concerto/Graphics/RHI/Vulkan/Utils/Utils.hpp"
 #include "Concerto/Graphics/RHI/Vulkan/VkRHICommandBuffer/VkRHICommandBuffer.hpp"
@@ -44,9 +45,6 @@ namespace cct::gfx::rhi
 	VkRHISwapChain::~VkRHISwapChain()
 	{
 		WaitAll();
-
-		if (m_presentQueue)
-			m_presentQueue->WaitIdle();
 
 		m_colorTextures.clear();
 		m_frames.clear();
@@ -99,8 +97,7 @@ namespace cct::gfx::rhi
 
 	void VkRHISwapChain::WaitAll() const
 	{
-		for (auto& frame : m_frames)
-			frame.GetRenderFence().Wait(std::numeric_limits<UInt64>::max());
+		GetRHIDevice().WaitIdle();
 	}
 
 	VkRHICommandPool& VkRHISwapChain::GetCommandPool() const
@@ -208,8 +205,16 @@ namespace cct::gfx::rhi
 
 		const vk::Queue& presentQueue = m_owner->GetPresentQueue();
 
-		m_renderFence.Reset();
-		presentQueue.Submit(Cast<VkRHICommandBuffer&>(*m_commandBuffer), &m_presentSemaphore, &m_renderSemaphore, m_renderFence);
+		if (const VkResult reset = m_renderFence.Reset(); reset != VK_SUCCESS)
+		{
+			throw vk::VkException(reset);
+		}
+		const VkResult submitted = presentQueue.Submit(Cast<VkRHICommandBuffer&>(*m_commandBuffer), &m_presentSemaphore, &m_renderSemaphore, m_renderFence);
+		if (submitted != VK_SUCCESS)
+		{
+			throw vk::VkException(submitted);
+		}
+		m_submissionPending = true;
 		m_owner->Present(m_imageIndex);
 		CCT_FRAME_MARK();
 	}
@@ -235,12 +240,18 @@ namespace cct::gfx::rhi
 #endif
 	}
 
-	void VkRHISwapChain::SwapChainFrame::Wait() const
+	void VkRHISwapChain::SwapChainFrame::Wait()
 	{
 		CCT_AUTO_PROFILER_SCOPE();
-
-		m_renderFence.Wait(-1);
-		m_renderFence.Reset();
+		if (!m_submissionPending)
+		{
+			return;
+		}
+		if (const VkResult waited = m_renderFence.Wait(std::numeric_limits<UInt64>::max()); waited != VK_SUCCESS)
+		{
+			throw vk::VkException(waited);
+		}
+		m_submissionPending = false;
 	}
 
 	const vk::Semaphore& VkRHISwapChain::SwapChainFrame::GetPresentSemaphore() const
@@ -253,8 +264,4 @@ namespace cct::gfx::rhi
 		return m_renderSemaphore;
 	}
 
-	const vk::Fence& VkRHISwapChain::SwapChainFrame::GetRenderFence() const
-	{
-		return m_renderFence;
-	}
 } // namespace cct::gfx::rhi

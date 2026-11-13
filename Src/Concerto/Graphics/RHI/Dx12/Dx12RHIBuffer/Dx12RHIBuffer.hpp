@@ -22,6 +22,7 @@ namespace cct::gfx::rhi
 		void RecordReadback(CommandBuffer& cmd) override;
 		bool Map(Byte** data) override;
 		void UnMap() override;
+		[[nodiscard]] BufferMemoryProperties GetMemoryProperties() const override;
 
 		[[nodiscard]] ID3D12Resource* GetResource() const
 		{
@@ -51,6 +52,7 @@ namespace cct::gfx::rhi
 		Dx12RHIDevice* m_device;
 		UInt32 m_size;
 		bool m_allowMapping;
+		bool m_hostReadback = false;
 		D3D12_GPU_VIRTUAL_ADDRESS m_gpuAddress = 0;
 		mutable D3D12_RESOURCE_STATES m_currentState = D3D12_RESOURCE_STATE_COMMON;
 	};

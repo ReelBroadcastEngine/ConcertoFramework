@@ -18,8 +18,11 @@ namespace cct::gfx::rhi
 		explicit VkRHIFence(VkRHIDevice& device);
 		~VkRHIFence() override = default;
 
-		void Wait() override;
-		void Reset() override;
+		[[nodiscard]] Result<void, QueueError> Wait() override;
+		[[nodiscard]] Result<void, QueueError> Reset() override;
+
+		[[nodiscard]] bool IsSignalPending() const;
+		void MarkSignalPending();
 
 		vk::Fence& GetFence()
 		{
@@ -28,6 +31,8 @@ namespace cct::gfx::rhi
 
 	private:
 		vk::Fence m_fence;
+		bool m_signalPending = false;
+		bool m_completed = false;
 	};
 } // namespace cct::gfx::rhi
 

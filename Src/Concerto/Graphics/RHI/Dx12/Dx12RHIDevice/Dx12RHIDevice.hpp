@@ -11,6 +11,7 @@
 #include <optional>
 
 #include "Concerto/Graphics/Backend/Dx12/Wrapper/Device/Device.hpp"
+#include "Concerto/Graphics/Backend/Dx12/Wrapper/Fence/Fence.hpp"
 #include "Concerto/Graphics/Backend/Dx12/Wrapper/Queue/Queue.hpp"
 #include "Concerto/Graphics/RHI/Device.hpp"
 #include "Concerto/Graphics/RHI/Dx12/Dx12RHIDescriptorPool/Dx12RHIDescriptorPool.hpp"
@@ -56,11 +57,12 @@ namespace cct::gfx::rhi
 		std::shared_ptr<Texture> CreateTexture(PixelFormat format, Int32 width, Int32 height) override;
 		std::shared_ptr<Texture> CreateStorageTexture(PixelFormat format, Int32 width, Int32 height) override;
 		void WaitIdle() override;
+		[[nodiscard]] DeviceLimits GetLimits() const override;
 		std::unique_ptr<GpuMesh> CreateMesh(const std::string& meshPath, rhi::MaterialBuilder& materialBuilder, rhi::TextureBuilder& textureBuilder, const RenderPass& renderPass) override;
 
 		Queue& GetQueue(rhi::QueueFamily family) override;
 		std::unique_ptr<Fence> CreateFence() override;
-		std::unique_ptr<QueryPool> CreateQueryPool() override;
+		std::unique_ptr<QueryPool> CreateQueryPool(UInt32 timestampCount) override;
 		std::shared_ptr<Texture> ImportTexture(const TextureImportInfo& info) override;
 		std::shared_ptr<Texture> AdoptExternalImage(void* nativeImage, PixelFormat format, Int32 width, Int32 height,
 													Int32 planeIndex = -1) override;
@@ -90,14 +92,14 @@ namespace cct::gfx::rhi
 		}
 		void ExecuteAndWait(ID3D12GraphicsCommandList* cmdList);
 		void EnsureRenderQueue() override;
+		// S_OK while the device is usable.
+		[[nodiscard]] HRESULT GetRemovedReason() const;
 
 	private:
 		std::optional<Dx12RHIDescriptorPool> m_descriptorPool;
 		std::mutex m_descriptorPoolMutex;
 		ID3D12CommandQueue* m_renderQueue = nullptr;
-		Microsoft::WRL::ComPtr<ID3D12Fence> m_uploadFence;
-		HANDLE m_uploadEvent = nullptr;
-		UInt64 m_uploadFenceValue = 0;
+		std::optional<dx12::Fence> m_idleFence;
 		std::unique_ptr<Dx12RHIQueue> m_graphicsQueue;
 		std::filesystem::path m_shaderModulePath;
 		dx12::Queue m_headlessQueue;

@@ -39,8 +39,6 @@ namespace cct::gfx::rhi
 			std::size_t GetCurrentFrameIndex() override;
 			void Wait() const;
 
-			const dx12::Fence& GetRenderFence() const;
-
 			static constexpr UInt32 InvalidFrameIndex = std::numeric_limits<UInt32>::max();
 
 		private:

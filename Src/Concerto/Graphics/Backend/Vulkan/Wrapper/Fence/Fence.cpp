@@ -33,24 +33,21 @@ namespace cct::gfx::vk
 		info.flags = signaled ? VK_FENCE_CREATE_SIGNALED_BIT : 0;
 
 		m_lastResult = m_device->vkCreateFence(*m_device->Get(), &info, nullptr, &m_handle);
-		CCT_ASSERT(m_lastResult == VK_SUCCESS, "ConcertoGraphics: vkCreateFence failed VkResult={}", static_cast<int>(m_lastResult));
 
 		return m_lastResult;
 	}
 
-	void Fence::Wait(UInt64 timeout) const
+	VkResult Fence::Wait(UInt64 timeout) const
 	{
 		CCT_ASSERT(IsValid(), "Invalid object state, 'Create' must be called");
 		CCT_AUTO_PROFILER_SCOPE();
 
-		const VkResult result = m_device->vkWaitForFences(*m_device->Get(), 1, &m_handle, true, timeout);
-		CCT_ASSERT(result == VK_SUCCESS, "ConcertoGraphics: vkWaitForFences failed VKResult={}", static_cast<int>(result));
+		return m_device->vkWaitForFences(*m_device->Get(), 1, &m_handle, VK_TRUE, timeout);
 	}
 
-	void Fence::Reset() const
+	VkResult Fence::Reset() const
 	{
 		CCT_ASSERT(IsValid(), "Invalid object state, 'Create' must be called");
-		const VkResult result = m_device->vkResetFences(*m_device->Get(), 1, &m_handle);
-		CCT_ASSERT(result == VK_SUCCESS, "ConcertoGraphics: vkResetFences failed VKResult={}", static_cast<int>(result));
+		return m_device->vkResetFences(*m_device->Get(), 1, &m_handle);
 	}
 } // namespace cct::gfx::vk

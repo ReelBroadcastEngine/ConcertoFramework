@@ -4,6 +4,8 @@
 
 #include "Concerto/Graphics/Backend/Vulkan/Wrapper/CommandBuffer/CommandBuffer.hpp"
 
+#include <exception>
+#include <limits>
 #include <utility>
 
 #include "Concerto/Graphics/Backend/Vulkan/Utils.hpp"
@@ -292,10 +294,29 @@ namespace cct::gfx::vk
 
 		const VkSubmitInfo submitInfo = VulkanInitializer::SubmitInfo(&m_handle);
 		const VkResult result = m_device->vkQueueSubmit(*queue.Get(), 1, &submitInfo, *fence.Get());
-		CCT_ASSERT(result == VK_SUCCESS, "ConcertoGraphics: vkQueueSubmit failed VKResult={}", static_cast<int>(result));
-
-		fence.Wait(9999999999);
-		fence.Reset();
+		if (result != VK_SUCCESS)
+		{
+			throw VkException(result);
+		}
+		if (const VkResult waited = fence.Wait(std::numeric_limits<UInt64>::max()); waited != VK_SUCCESS)
+		{
+			if (waited != VK_ERROR_DEVICE_LOST)
+			{
+				try
+				{
+					m_device->WaitIdle();
+				}
+				catch (...)
+				{
+					std::terminate();
+				}
+			}
+			throw VkException(waited);
+		}
+		if (const VkResult reset = fence.Reset(); reset != VK_SUCCESS)
+		{
+			throw VkException(reset);
+		}
 		commandPool.Reset();
 	}
 

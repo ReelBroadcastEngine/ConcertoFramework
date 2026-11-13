@@ -18,8 +18,11 @@ namespace cct::gfx::rhi
 		explicit Dx12RHIFence(Dx12RHIDevice& device);
 		~Dx12RHIFence() override = default;
 
-		void Wait() override;
-		void Reset() override;
+		[[nodiscard]] Result<void, QueueError> Wait() override;
+		[[nodiscard]] Result<void, QueueError> Reset() override;
+
+		[[nodiscard]] bool IsSignalPending() const;
+		[[nodiscard]] HRESULT Signal(ID3D12CommandQueue& queue);
 
 		dx12::Fence& GetFence()
 		{
@@ -27,7 +30,10 @@ namespace cct::gfx::rhi
 		}
 
 	private:
+		Dx12RHIDevice* m_device;
 		dx12::Fence m_fence;
+		bool m_signalPending = false;
+		bool m_completed = false;
 	};
 } // namespace cct::gfx::rhi
 

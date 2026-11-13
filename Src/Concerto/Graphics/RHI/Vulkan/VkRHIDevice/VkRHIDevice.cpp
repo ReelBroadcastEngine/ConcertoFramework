@@ -7,6 +7,7 @@
 #include <Concerto/Core/Assert.hpp>
 #include <Concerto/Core/Cast.hpp>
 
+#include "Concerto/Graphics/Backend/Vulkan/VkException.hpp"
 #include "Concerto/Graphics/Backend/Vulkan/Wrapper/Image/Image.hpp"
 #include "Concerto/Graphics/Backend/Vulkan/Wrapper/Instance/Instance.hpp"
 #include "Concerto/Graphics/Backend/Vulkan/Wrapper/PhysicalDevice/PhysicalDevice.hpp"
@@ -165,12 +166,30 @@ namespace cct::gfx::rhi
 	{
 		const bool isDepth = (format == PixelFormat::D32f);
 		const VkImageAspectFlags aspect = isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-		return std::make_shared<VkRHITexture>(*this, format, width, height, aspect);
+		try
+		{
+			return std::make_shared<VkRHITexture>(*this, format, width, height, aspect);
+		}
+		catch (const vk::VkException& exception)
+		{
+			CCT_RHI_LOG_WARN("VkRHIDevice: {}x{} texture not created (VkResult {})", width, height, static_cast<int>(exception.GetResult()));
+			return nullptr;
+		}
 	}
 
 	void VkRHIDevice::WaitIdle()
 	{
 		vk::Device::WaitIdle();
+	}
+
+	DeviceLimits VkRHIDevice::GetLimits() const
+	{
+		const VkPhysicalDeviceLimits& limits = vk::Device::GetPhysicalDevice().GetProperties().limits;
+		return DeviceLimits{
+			.m_maxTextureDimension2D = limits.maxImageDimension2D,
+			.m_maxFrameBufferWidth = limits.maxFramebufferWidth,
+			.m_maxFrameBufferHeight = limits.maxFramebufferHeight,
+		};
 	}
 
 	std::unique_ptr<TextureBuilder> VkRHIDevice::CreateTextureBuilder()
@@ -206,7 +225,15 @@ namespace cct::gfx::rhi
 
 	std::unique_ptr<rhi::Buffer> VkRHIDevice::CreateBuffer(rhi::BufferUsageFlags usage, UInt32 allocationSize, bool allowBufferMapping)
 	{
-		return std::make_unique<VkRHIBuffer>(*this, usage, allocationSize, allowBufferMapping);
+		try
+		{
+			return std::make_unique<VkRHIBuffer>(*this, usage, allocationSize, allowBufferMapping);
+		}
+		catch (const vk::VkException& exception)
+		{
+			CCT_RHI_LOG_WARN("VkRHIDevice: buffer of {} bytes not allocated (VkResult {})", allocationSize, static_cast<int>(exception.GetResult()));
+			return nullptr;
+		}
 	}
 
 	std::size_t VkRHIDevice::GetMinimumUniformBufferOffsetAlignment() const
@@ -562,11 +589,19 @@ namespace cct::gfx::rhi
 
 	std::shared_ptr<Texture> VkRHIDevice::CreateStorageTexture(PixelFormat format, Int32 width, Int32 height)
 	{
-		vk::Image image = vk::Device::GetAllocator().AllocateImage(
-			VkExtent2D{static_cast<UInt32>(width), static_cast<UInt32>(height)},
-			Converters::ToVulkan(format),
-			VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-		return std::make_shared<VkRHITexture>(*this, std::move(image), VK_IMAGE_ASPECT_COLOR_BIT);
+		try
+		{
+			vk::Image image = vk::Device::GetAllocator().AllocateImage(
+				VkExtent2D{.width = static_cast<UInt32>(width), .height = static_cast<UInt32>(height)},
+				Converters::ToVulkan(format),
+				VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+			return std::make_shared<VkRHITexture>(*this, std::move(image), VK_IMAGE_ASPECT_COLOR_BIT);
+		}
+		catch (const vk::VkException& exception)
+		{
+			CCT_RHI_LOG_WARN("VkRHIDevice: {}x{} storage texture not created (VkResult {})", width, height, static_cast<int>(exception.GetResult()));
+			return nullptr;
+		}
 	}
 
 	std::shared_ptr<rhi::Pipeline> VkRHIDevice::CreateComputePipeline(const rhi::ShaderModule& computeShader, const rhi::PipelineLayout& pipelineLayout)
@@ -578,9 +613,37 @@ namespace cct::gfx::rhi
 		return std::make_shared<VkRHIPipeline>(std::move(vkPipeline), std::move(pipelineLayoutCopy));
 	}
 
-	std::unique_ptr<QueryPool> VkRHIDevice::CreateQueryPool()
+	std::unique_ptr<QueryPool> VkRHIDevice::CreateQueryPool(UInt32 timestampCount)
 	{
-		return std::make_unique<VkRHIQueryPool>(*this);
+		if (timestampCount == 0)
+		{
+			return nullptr;
+		}
+		const std::span<VkQueueFamilyProperties> families = GetPhysicalDevice().GetQueueFamilyProperties();
+		const UInt32 graphicsFamily = GetQueueFamilyIndex(vk::Queue::Type::Graphics);
+		if (graphicsFamily >= families.size())
+		{
+			return nullptr;
+		}
+		const UInt32 validBits = families.subspan(graphicsFamily).front().timestampValidBits;
+		const float timestampPeriod = GetPhysicalDevice().GetProperties().limits.timestampPeriod;
+		if (validBits == 0 || timestampPeriod <= 0.F)
+		{
+			return nullptr;
+		}
+
+		VkQueryPoolCreateInfo info{};
+		info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+		info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+		info.queryCount = timestampCount;
+		VkQueryPool queryPool = VK_NULL_HANDLE;
+		const VkResult result = vkCreateQueryPool(*Get(), &info, nullptr, &queryPool);
+		if (result != VK_SUCCESS)
+		{
+			CCT_RHI_LOG_WARN("VkRHIDevice: vkCreateQueryPool failed ({}); GPU timestamps unavailable", static_cast<int>(result));
+			return nullptr;
+		}
+		return std::make_unique<VkRHIQueryPool>(*this, queryPool, timestampCount, validBits, static_cast<double>(timestampPeriod));
 	}
 
 } // namespace cct::gfx::rhi

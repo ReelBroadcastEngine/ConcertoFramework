@@ -5,7 +5,10 @@
 #ifndef CONCERTO_GRAPHICS_RHI_QUEUE_HPP
 #define CONCERTO_GRAPHICS_RHI_QUEUE_HPP
 
+#include <Concerto/Core/Result/Result.hpp>
+
 #include "Concerto/Graphics/RHI/Defines.hpp"
+#include "Concerto/Graphics/RHI/QueueError.hpp"
 
 namespace cct::gfx::rhi
 {
@@ -17,7 +20,9 @@ namespace cct::gfx::rhi
 	public:
 		virtual ~Queue() = default;
 
-		virtual void Submit(CommandBuffer& cmdBuf, Fence* fence = nullptr) = 0;
+		// Success means the command buffer and the signal of the fence were both enqueued. A fence already submitted since
+		// its last Reset is refused with NotSubmitted, so that Fence::Wait always refers to this submission.
+		[[nodiscard]] virtual Result<void, QueueError> Submit(CommandBuffer& cmdBuf, Fence* fence = nullptr) = 0;
 	};
 } // namespace cct::gfx::rhi
 

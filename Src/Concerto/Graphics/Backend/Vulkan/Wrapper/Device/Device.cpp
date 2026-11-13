@@ -293,7 +293,15 @@ namespace cct::gfx::vk
 	void Device::WaitIdle() const
 	{
 		const VkResult result = this->vkDeviceWaitIdle(m_handle);
-		CCT_ASSERT(result == VK_SUCCESS, "ConcertoGraphics: Failed to Wait for device idle VkResult={}", static_cast<int>(result));
+		if (result == VK_ERROR_DEVICE_LOST)
+		{
+			CCT_VK_LOG_ERROR("vkDeviceWaitIdle: device lost");
+			return;
+		}
+		if (result != VK_SUCCESS)
+		{
+			throw VkException(result);
+		}
 	}
 
 	void Device::UpdateDescriptorSetsWrite(std::span<VkWriteDescriptorSet> descriptorWrites) const

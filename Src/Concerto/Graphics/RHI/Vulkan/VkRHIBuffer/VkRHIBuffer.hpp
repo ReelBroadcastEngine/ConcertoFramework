@@ -14,10 +14,15 @@ namespace cct::gfx::rhi
 	class CONCERTO_GRAPHICS_RHI_BASE_API VkRHIBuffer final : public rhi::Buffer, public vk::Buffer
 	{
 	public:
+		// A mappable buffer with BufferUsage::HostReadback is allocated for device writes read by the host, any other
+		// mappable buffer for host writes read by the device (vk::Buffer::HostAccess). Throws vk::VkException when the
+		// allocation fails.
 		VkRHIBuffer(VkRHIDevice& device, rhi::BufferUsageFlags usage, UInt32 allocationSize, bool allowBufferMapping);
 
 		bool Map(Byte** data) override;
 		void UnMap() override;
+		void RecordReadback(CommandBuffer& cmd) override;
+		[[nodiscard]] BufferMemoryProperties GetMemoryProperties() const override;
 
 	private:
 		VkRHIDevice& m_device;

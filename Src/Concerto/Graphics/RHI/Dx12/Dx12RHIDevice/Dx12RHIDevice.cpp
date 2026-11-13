@@ -190,12 +190,22 @@ namespace cct::gfx::rhi
 
 	std::shared_ptr<Texture> Dx12RHIDevice::CreateTexture(PixelFormat format, Int32 width, Int32 height)
 	{
-		return std::make_shared<Dx12RHITexture>(*this, format, width, height);
+		auto texture = std::make_shared<Dx12RHITexture>(*this, format, width, height);
+		if (texture->GetResource() == nullptr)
+		{
+			return nullptr;
+		}
+		return texture;
 	}
 
 	std::shared_ptr<Texture> Dx12RHIDevice::CreateStorageTexture(PixelFormat format, Int32 width, Int32 height)
 	{
-		return std::make_shared<Dx12RHITexture>(*this, format, width, height, /* allowUnorderedAccess */ true);
+		auto texture = std::make_shared<Dx12RHITexture>(*this, format, width, height, /* allowUnorderedAccess */ true);
+		if (texture->GetResource() == nullptr)
+		{
+			return nullptr;
+		}
+		return texture;
 	}
 
 	std::shared_ptr<Texture> Dx12RHIDevice::ImportTexture(const rhi::TextureImportInfo& info)
@@ -250,20 +260,39 @@ namespace cct::gfx::rhi
 
 	void Dx12RHIDevice::WaitIdle()
 	{
-		if (!m_renderQueue)
-			return;
-
-		if (!m_uploadFence)
+		if (m_renderQueue == nullptr || FAILED(GetRemovedReason()))
 		{
-			dx12::Device::Get()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_uploadFence));
-			m_uploadEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-			m_uploadFenceValue = 0;
+			return;
 		}
+		if (!m_idleFence)
+		{
+			m_idleFence.emplace(*this);
+		}
+		HRESULT result = m_idleFence->Signal(*m_renderQueue);
+		if (SUCCEEDED(result))
+		{
+			result = m_idleFence->Wait();
+		}
+		if (FAILED(result) && SUCCEEDED(GetRemovedReason()))
+		{
+			CCT_RHI_LOG_ERROR("Dx12RHIDevice: queue idle could not be confirmed (HRESULT {:#x})", static_cast<unsigned>(result));
+			throw dx12::Dx12Exception(result);
+		}
+	}
 
-		++m_uploadFenceValue;
-		m_renderQueue->Signal(m_uploadFence.Get(), m_uploadFenceValue);
-		m_uploadFence->SetEventOnCompletion(m_uploadFenceValue, m_uploadEvent);
-		WaitForSingleObject(m_uploadEvent, INFINITE);
+	HRESULT Dx12RHIDevice::GetRemovedReason() const
+	{
+		ID3D12Device* device = dx12::Device::Get();
+		return device != nullptr ? device->GetDeviceRemovedReason() : DXGI_ERROR_DEVICE_REMOVED;
+	}
+
+	DeviceLimits Dx12RHIDevice::GetLimits() const
+	{
+		return DeviceLimits{
+			.m_maxTextureDimension2D = D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION,
+			.m_maxFrameBufferWidth = D3D12_REQ_RENDER_TO_BUFFER_WINDOW_WIDTH,
+			.m_maxFrameBufferHeight = D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION,
+		};
 	}
 
 	std::unique_ptr<TextureBuilder> Dx12RHIDevice::CreateTextureBuilder()
@@ -294,7 +323,12 @@ namespace cct::gfx::rhi
 
 	std::unique_ptr<Buffer> Dx12RHIDevice::CreateBuffer(rhi::BufferUsageFlags usage, UInt32 allocationSize, bool allowBufferMapping)
 	{
-		return std::make_unique<Dx12RHIBuffer>(*this, usage, allocationSize, allowBufferMapping);
+		auto buffer = std::make_unique<Dx12RHIBuffer>(*this, usage, allocationSize, allowBufferMapping);
+		if (buffer->GetResource() == nullptr)
+		{
+			return nullptr;
+		}
+		return buffer;
 	}
 
 	std::size_t Dx12RHIDevice::GetMinimumUniformBufferOffsetAlignment() const
@@ -624,6 +658,10 @@ namespace cct::gfx::rhi
 	void Dx12RHIDevice::RegisterRenderQueue(ID3D12CommandQueue* queue)
 	{
 		m_renderQueue = queue;
+		if (m_graphicsQueue)
+		{
+			m_graphicsQueue->SetNativeQueue(queue);
+		}
 	}
 
 	void Dx12RHIDevice::EnsureRenderQueue()
@@ -639,22 +677,18 @@ namespace cct::gfx::rhi
 
 	void Dx12RHIDevice::ExecuteAndWait(ID3D12GraphicsCommandList* cmdList)
 	{
-		CCT_ASSERT(m_renderQueue, "ConcertoGraphics: No render queue registered on device");
-
-		if (!m_uploadFence)
+		EnsureRenderQueue();
+		if (m_renderQueue == nullptr)
 		{
-			dx12::Device::Get()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_uploadFence));
-			m_uploadEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-			m_uploadFenceValue = 0;
+			throw dx12::Dx12Exception(E_FAIL);
 		}
-
 		ID3D12CommandList* cmdLists[] = {cmdList};
 		m_renderQueue->ExecuteCommandLists(1, cmdLists);
-
-		++m_uploadFenceValue;
-		m_renderQueue->Signal(m_uploadFence.Get(), m_uploadFenceValue);
-		m_uploadFence->SetEventOnCompletion(m_uploadFenceValue, m_uploadEvent);
-		WaitForSingleObject(m_uploadEvent, INFINITE);
+		WaitIdle();
+		if (const HRESULT removed = GetRemovedReason(); FAILED(removed))
+		{
+			throw dx12::Dx12Exception(removed);
+		}
 	}
 
 	Queue& Dx12RHIDevice::GetQueue(rhi::QueueFamily family)
@@ -666,7 +700,7 @@ namespace cct::gfx::rhi
 
 		if (!m_graphicsQueue)
 		{
-			CCT_ASSERT(m_renderQueue, "ConcertoGraphics: Render queue not registered");
+			EnsureRenderQueue();
 			m_graphicsQueue = std::make_unique<Dx12RHIQueue>(m_renderQueue, *this);
 		}
 
@@ -678,8 +712,53 @@ namespace cct::gfx::rhi
 		return std::make_unique<Dx12RHIFence>(*this);
 	}
 
-	std::unique_ptr<QueryPool> Dx12RHIDevice::CreateQueryPool()
+	std::unique_ptr<QueryPool> Dx12RHIDevice::CreateQueryPool(UInt32 timestampCount)
 	{
-		return std::make_unique<Dx12RHIQueryPool>(*this);
+		EnsureRenderQueue();
+		ID3D12CommandQueue* queue = GetRenderQueue();
+		UINT64 frequency = 0;
+		if (timestampCount == 0 || queue == nullptr || FAILED(queue->GetTimestampFrequency(&frequency)) || frequency == 0)
+		{
+			return nullptr;
+		}
+
+		D3D12_QUERY_HEAP_DESC heapDesc{};
+		heapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+		heapDesc.Count = timestampCount;
+		Microsoft::WRL::ComPtr<ID3D12QueryHeap> queryHeap;
+		HRESULT hr = Get()->CreateQueryHeap(&heapDesc, IID_PPV_ARGS(&queryHeap));
+		if (FAILED(hr))
+		{
+			CCT_RHI_LOG_WARN("Dx12RHIDevice: CreateQueryHeap failed ({:#x}); GPU timestamps unavailable", static_cast<unsigned>(hr));
+			return nullptr;
+		}
+
+		D3D12_HEAP_PROPERTIES heapProperties{.Type = D3D12_HEAP_TYPE_READBACK};
+		D3D12_RESOURCE_DESC resourceDesc{};
+		resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+		resourceDesc.Width = sizeof(UInt64) * timestampCount;
+		resourceDesc.Height = 1;
+		resourceDesc.DepthOrArraySize = 1;
+		resourceDesc.MipLevels = 1;
+		resourceDesc.SampleDesc.Count = 1;
+		resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+		Microsoft::WRL::ComPtr<ID3D12Resource> readbackBuffer;
+		hr = Get()->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &resourceDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readbackBuffer));
+		if (FAILED(hr))
+		{
+			CCT_RHI_LOG_WARN("Dx12RHIDevice: query readback buffer creation failed ({:#x}); GPU timestamps unavailable", static_cast<unsigned>(hr));
+			return nullptr;
+		}
+		const D3D12_RANGE readRange{.Begin = 0, .End = static_cast<SIZE_T>(resourceDesc.Width)};
+		void* mapped = nullptr;
+		hr = readbackBuffer->Map(0, &readRange, &mapped);
+		if (FAILED(hr))
+		{
+			CCT_RHI_LOG_WARN("Dx12RHIDevice: query readback buffer mapping failed ({:#x}); GPU timestamps unavailable", static_cast<unsigned>(hr));
+			return nullptr;
+		}
+		constexpr double NanosecondsPerSecond = 1e9;
+		return std::make_unique<Dx12RHIQueryPool>(std::move(queryHeap), std::move(readbackBuffer), static_cast<const UInt64*>(mapped), timestampCount,
+												  NanosecondsPerSecond / static_cast<double>(frequency));
 	}
 } // namespace cct::gfx::rhi
