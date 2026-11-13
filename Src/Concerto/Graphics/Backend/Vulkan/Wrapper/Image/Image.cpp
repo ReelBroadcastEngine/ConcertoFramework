@@ -119,7 +119,11 @@ namespace cct::gfx::vk
 		imageAllocInfo.requiredFlags = static_cast<VkMemoryPropertyFlags>(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
 		m_lastResult = vmaCreateImage(*allocator.Get(), &imageCreateInfo, &imageAllocInfo, &m_handle, &m_allocation, nullptr);
-		CCT_ASSERT(m_lastResult == VK_SUCCESS, "ConcertoGraphics: vmaCreateImage failed VkResult={}", static_cast<int>(m_lastResult));
+		if (m_lastResult != VK_SUCCESS)
+		{
+			m_handle = VK_NULL_HANDLE;
+			m_allocation = VK_NULL_HANDLE;
+		}
 
 		return m_lastResult;
 	}

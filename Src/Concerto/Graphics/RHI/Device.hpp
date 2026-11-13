@@ -19,6 +19,7 @@
 #include "Concerto/Graphics/RHI/Buffer.hpp"
 #include "Concerto/Graphics/RHI/CommandPool.hpp"
 #include "Concerto/Graphics/RHI/Defines.hpp"
+#include "Concerto/Graphics/RHI/DeviceLimits.hpp"
 #include "Concerto/Graphics/RHI/Enums.hpp"
 #include "Concerto/Graphics/RHI/Fence.hpp"
 #include "Concerto/Graphics/RHI/FrameBuffer.hpp"
@@ -109,6 +110,7 @@ namespace cct::gfx::rhi
 		virtual std::size_t GetMinimumUniformBufferOffsetAlignment() const = 0;
 		virtual std::shared_ptr<Texture> CreateTexture(PixelFormat format, Int32 width, Int32 height) = 0;
 		virtual void WaitIdle() = 0;
+		[[nodiscard]] virtual DeviceLimits GetLimits() const = 0;
 		virtual std::unique_ptr<GpuMesh> CreateMesh(const std::string& meshPath, rhi::MaterialBuilder& materialBuilder, rhi::TextureBuilder& textureBuilder, const RenderPass& renderPass) = 0;
 
 		virtual Queue& GetQueue(rhi::QueueFamily family) = 0;

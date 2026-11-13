@@ -166,12 +166,30 @@ namespace cct::gfx::rhi
 	{
 		const bool isDepth = (format == PixelFormat::D32f);
 		const VkImageAspectFlags aspect = isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-		return std::make_shared<VkRHITexture>(*this, format, width, height, aspect);
+		try
+		{
+			return std::make_shared<VkRHITexture>(*this, format, width, height, aspect);
+		}
+		catch (const vk::VkException& exception)
+		{
+			CCT_RHI_LOG_WARN("VkRHIDevice: {}x{} texture not created (VkResult {})", width, height, static_cast<int>(exception.GetResult()));
+			return nullptr;
+		}
 	}
 
 	void VkRHIDevice::WaitIdle()
 	{
 		vk::Device::WaitIdle();
+	}
+
+	DeviceLimits VkRHIDevice::GetLimits() const
+	{
+		const VkPhysicalDeviceLimits& limits = vk::Device::GetPhysicalDevice().GetProperties().limits;
+		return DeviceLimits{
+			.m_maxTextureDimension2D = limits.maxImageDimension2D,
+			.m_maxFrameBufferWidth = limits.maxFramebufferWidth,
+			.m_maxFrameBufferHeight = limits.maxFramebufferHeight,
+		};
 	}
 
 	std::unique_ptr<TextureBuilder> VkRHIDevice::CreateTextureBuilder()
@@ -571,11 +589,19 @@ namespace cct::gfx::rhi
 
 	std::shared_ptr<Texture> VkRHIDevice::CreateStorageTexture(PixelFormat format, Int32 width, Int32 height)
 	{
-		vk::Image image = vk::Device::GetAllocator().AllocateImage(
-			VkExtent2D{static_cast<UInt32>(width), static_cast<UInt32>(height)},
-			Converters::ToVulkan(format),
-			VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-		return std::make_shared<VkRHITexture>(*this, std::move(image), VK_IMAGE_ASPECT_COLOR_BIT);
+		try
+		{
+			vk::Image image = vk::Device::GetAllocator().AllocateImage(
+				VkExtent2D{static_cast<UInt32>(width), static_cast<UInt32>(height)},
+				Converters::ToVulkan(format),
+				VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+			return std::make_shared<VkRHITexture>(*this, std::move(image), VK_IMAGE_ASPECT_COLOR_BIT);
+		}
+		catch (const vk::VkException& exception)
+		{
+			CCT_RHI_LOG_WARN("VkRHIDevice: {}x{} storage texture not created (VkResult {})", width, height, static_cast<int>(exception.GetResult()));
+			return nullptr;
+		}
 	}
 
 	std::shared_ptr<rhi::Pipeline> VkRHIDevice::CreateComputePipeline(const rhi::ShaderModule& computeShader, const rhi::PipelineLayout& pipelineLayout)

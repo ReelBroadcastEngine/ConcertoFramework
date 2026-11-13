@@ -190,12 +190,18 @@ namespace cct::gfx::rhi
 
 	std::shared_ptr<Texture> Dx12RHIDevice::CreateTexture(PixelFormat format, Int32 width, Int32 height)
 	{
-		return std::make_shared<Dx12RHITexture>(*this, format, width, height);
+		auto texture = std::make_shared<Dx12RHITexture>(*this, format, width, height);
+		if (texture->GetResource() == nullptr)
+			return nullptr;
+		return texture;
 	}
 
 	std::shared_ptr<Texture> Dx12RHIDevice::CreateStorageTexture(PixelFormat format, Int32 width, Int32 height)
 	{
-		return std::make_shared<Dx12RHITexture>(*this, format, width, height, /* allowUnorderedAccess */ true);
+		auto texture = std::make_shared<Dx12RHITexture>(*this, format, width, height, /* allowUnorderedAccess */ true);
+		if (texture->GetResource() == nullptr)
+			return nullptr;
+		return texture;
 	}
 
 	std::shared_ptr<Texture> Dx12RHIDevice::ImportTexture(const rhi::TextureImportInfo& info)
@@ -264,6 +270,15 @@ namespace cct::gfx::rhi
 		m_renderQueue->Signal(m_uploadFence.Get(), m_uploadFenceValue);
 		m_uploadFence->SetEventOnCompletion(m_uploadFenceValue, m_uploadEvent);
 		WaitForSingleObject(m_uploadEvent, INFINITE);
+	}
+
+	DeviceLimits Dx12RHIDevice::GetLimits() const
+	{
+		return DeviceLimits{
+			.m_maxTextureDimension2D = D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION,
+			.m_maxFrameBufferWidth = D3D12_REQ_RENDER_TO_BUFFER_WINDOW_WIDTH,
+			.m_maxFrameBufferHeight = D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION,
+		};
 	}
 
 	std::unique_ptr<TextureBuilder> Dx12RHIDevice::CreateTextureBuilder()
